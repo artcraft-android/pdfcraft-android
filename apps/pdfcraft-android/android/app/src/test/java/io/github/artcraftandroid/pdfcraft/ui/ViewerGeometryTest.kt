@@ -79,11 +79,46 @@ class ViewerGeometryTest {
         s.zoomTo(100f, Offset.Zero)
         assertEquals(ViewerState.MAX_ZOOM, s.zoom, 0.0001f)
         s.zoomTo(0.01f, Offset.Zero)
-        assertEquals(ViewerState.MIN_ZOOM, s.zoom, 0.0001f)
+        assertEquals(ViewerState.ZOOM_OUT_LIMIT, s.zoom, 0.0001f)
+        s.zoomTo(1f, Offset.Zero)
         s.scrollBy(0f, 1_000_000f)
         assertEquals(0f, s.scrollY, 0.0001f)
         s.scrollBy(0f, -1_000_000f)
         assertEquals(s.layout.height - s.viewH, s.scrollY, 0.5f)
+    }
+
+    @Test
+    fun continuousZoomsOutPastFitWidthAndCentresTheDocument() {
+        val s = state(List(3) { letter })
+        s.zoomTo(0.5f, Offset(540f, 700f))
+        assertEquals(0.5f, s.zoom, 0.0001f)
+        // the document is narrower than the screen: centred horizontally
+        assertEquals(-(s.viewW - s.layout.width * 0.5f) / 2f, s.scrollX, 0.5f)
+        // pages are mapped back correctly while zoomed out
+        val p = s.screenToPage(s.pageToScreen(1, 100f, 200f))!!
+        assertEquals(1, p.page)
+        assertEquals(100f, p.x, 0.1f)
+        assertEquals(200f, p.y, 0.1f)
+    }
+
+    @Test
+    fun singlePageStaysAtFitWidth() {
+        val s = state(List(3) { letter })
+        s.switchMode(PageMode.SinglePage)
+        s.zoomTo(0.3f, Offset.Zero)
+        assertEquals(ViewerState.MIN_ZOOM, s.zoom, 0.0001f)
+    }
+
+    @Test
+    fun zoomedOutPagesRenderAtHalfScale() {
+        val s = state(List(20) { letter })
+        val full = s.requests(1, 100f).first()
+        assertEquals(0, full.key.level)
+        s.zoomTo(0.3f, Offset(540f, 700f))
+        val out = s.requests(1, 100f)
+        assertTrue(out.isNotEmpty())
+        assertTrue(out.all { it.key.level == ViewerState.LOWRES_LEVEL && it.tile == null })
+        assertEquals(full.scale * 0.5f, out.first().scale, 0.001f)
     }
 
     @Test

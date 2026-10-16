@@ -55,7 +55,8 @@ class ViewerState(pages: List<PageSize>) {
             return DocLayout(pages, mode, viewW, viewH, gap, margin, padTop, padBottom).also { cachedLayout = it }
         }
 
-    val minZoom: Float get() = MIN_ZOOM
+    /** Continuous pages zoom out past fit-width; single-page mode rests on one page filling the width. */
+    val minZoom: Float get() = if (mode == PageMode.Continuous) ZOOM_OUT_LIMIT else MIN_ZOOM
     val maxZoom: Float get() = MAX_ZOOM
 
     /** The page the reader is on: the one at the middle of the screen. */
@@ -249,13 +250,19 @@ class ViewerState(pages: List<PageSize>) {
         if (level > 0) {
             for (i in visible) tilesFor(i, gen, level, maxScale, out)
         }
-        val around = visiblePages(1.5f)
+        val around = visiblePages(if (zoom < LOWRES_BELOW) 0.5f else 1.5f)
         for (i in around) if (i !in visible) out.add(baseRequest(i, gen, maxScale))
         return out
     }
 
-    private fun baseRequest(i: Int, gen: Long, maxScale: Float) =
-        ImageRequest(ImageKey(i, gen, 0), min(layout.scaleOf(i), maxScale), null)
+    /** Zoomed far out, whole pages are drawn from half-scale renders ([LOWRES_LEVEL]); many fit on screen. */
+    fun baseLevel(): Int = if (zoom < LOWRES_BELOW) LOWRES_LEVEL else 0
+
+    private fun baseRequest(i: Int, gen: Long, maxScale: Float): ImageRequest {
+        val level = baseLevel()
+        val factor = if (level == LOWRES_LEVEL) 0.5f else 1f
+        return ImageRequest(ImageKey(i, gen, level), min(layout.scaleOf(i) * factor, maxScale), null)
+    }
 
     /** 0 at about zoom 1; then one level per half octave of zoom. */
     fun detailLevel(): Int = if (zoom < 1.2f) 0 else ceil(ln(zoom) / ln(LEVEL_STEP)).toInt().coerceAtLeast(1)
@@ -290,7 +297,13 @@ class ViewerState(pages: List<PageSize>) {
     }
 
     companion object {
+        /** Fit-width: the least single-page mode zooms to. */
         const val MIN_ZOOM = 1f
+
+        /** How far continuous mode zooms out (a quarter of fit-width). */
+        const val ZOOM_OUT_LIMIT = 0.25f
+        const val LOWRES_BELOW = 0.6f
+        const val LOWRES_LEVEL = -1
         const val MAX_ZOOM = 10f
         const val TILE = 512
         const val LEVEL_STEP = 1.4142135f

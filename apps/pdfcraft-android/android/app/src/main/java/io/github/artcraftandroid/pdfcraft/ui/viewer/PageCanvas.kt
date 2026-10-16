@@ -99,7 +99,8 @@ fun PageCanvas(
                         onDoubleTap()
                         flinger[0]?.cancel()
                         val from = state.zoom
-                        val to = if (from < 1.6f) 2.5f else 1f
+                        // zoomed out: back to fit-width; fit-width: in; zoomed in: back to fit-width
+                        val to = if (from < 0.99f) 1f else if (from < 1.6f) 2.5f else 1f
                         flinger[0] = scope.launch {
                             val anim = Animatable(from)
                             anim.animateTo(to, tween(DOUBLE_TAP_MS)) { state.zoomTo(value, p) }
@@ -194,7 +195,7 @@ private fun DrawScope.drawPages(state: ViewerState, images: PageImages, gen: Lon
         // a thin shadow line around the paper, as a printed page on a grey desk
         drawRect(look.pageShadow, topLeft = Offset(r.left - 1f, r.top - 1f), size = Size(r.width + 2f, r.height + 2f))
         drawRect(if (look.invert) Color.Black else Color.White, topLeft = r.topLeft, size = r.size)
-        val base = images.get(ImageKey(i, gen, 0)) ?: images.latestBase(i)
+        val base = images.get(ImageKey(i, gen, state.baseLevel())) ?: images.get(ImageKey(i, gen, 0)) ?: images.latestBase(i)
         if (base != null) drawImageIn(base, r, look.invert)
         if (level > 0) {
             val s = state.levelScale(i, level, maxScale)
