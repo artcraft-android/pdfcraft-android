@@ -1,5 +1,6 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -87,7 +88,7 @@ fun MoreSheet(vm: AppViewModel, doc: OpenDocument) {
             androidx.compose.foundation.layout.WindowInsets.statusBars.getTop(density),
             androidx.compose.foundation.layout.WindowInsets.displayCutout.getTop(density),
         ).toDp()
-    } + TopBarHeight
+    } + TopBubbleReserve
     PdfSheet(onDismiss = ::close, maxHeightFraction = fraction, topReserve = top) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -405,7 +406,7 @@ private fun ToolTile(icon: ImageVector, label: String, tint: Color, modifier: Mo
         modifier.clickable(role = Role.Button, onClick = onClick).padding(vertical = 6.dp).semantics { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)).background(tileBackground(tint, c.dark)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(56.dp).clip(PdfShapes.Small).background(tileBackground(tint, c.dark)), contentAlignment = Alignment.Center) {
             Icon(icon, null, tint = tint, modifier = Modifier.size(30.dp))
         }
         Spacer(Modifier.height(11.dp))

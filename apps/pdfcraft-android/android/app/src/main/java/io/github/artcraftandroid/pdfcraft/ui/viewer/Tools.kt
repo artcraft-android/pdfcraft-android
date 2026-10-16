@@ -1,5 +1,7 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.FloatEdge
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -425,7 +427,7 @@ fun PropertyPicker(vm: AppViewModel, tool: StyledTool, picker: Picker, markup: T
     val prefs = vm.toolPrefs
     val c = pdfColors
     // over the tool's bar, which stays in view with the picker's button shaded
-    PdfSheet(onDismiss = onDismiss, modifier = Modifier.padding(bottom = BottomBarHeight + 1.dp).navigationBarsPadding(), bottomBand = false) {
+    PdfSheet(onDismiss = onDismiss, modifier = Modifier.padding(bottom = BottomBarHeight + FloatEdge + BubbleInsetBottom + 6.dp).navigationBarsPadding(), bottomBand = false) {
         when (picker) {
             Picker.Color -> {
                 val title = when (tool) {
@@ -476,7 +478,7 @@ fun InkWidthRow(color: Color, selected: Float?, onPick: (Float) -> Unit) {
         InkWidths.forEachIndexed { i, w ->
             Box(
                 Modifier.size(48.dp)
-                    .then(if (selected == w) Modifier.border(1.5.dp, c.accent, RoundedCornerShape(4.dp)) else Modifier)
+                    .then(if (selected == w) Modifier.border(1.5.dp, c.accent, PdfShapes.Small) else Modifier)
                     .clickable(role = Role.RadioButton) { onPick(w) }
                     .semantics { contentDescription = "Stroke width ${i + 1}" },
                 contentAlignment = Alignment.Center,

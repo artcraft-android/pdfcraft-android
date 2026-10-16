@@ -89,6 +89,9 @@ fun AppRoot(vm: AppViewModel, onBrowse: () -> Unit, onPickSignatureImage: () -> 
     }
     // Back in the viewer closes the document (saving it) and returns to Home
     androidx.activity.compose.BackHandler(enabled = doc != null && vm.toolScreen == null) { vm.closeDocument() }
+    // what floats above Home or the viewer (sheets, the snackbar, the viewer's bars) frosts the screen below it
+    val glass = rememberGlassSource()
+    androidx.compose.runtime.CompositionLocalProvider(LocalGlassSource provides glass) {
     // sideways, the camera cutout and the navigation bar sit at the sides: content stays between
     // them, on black, as the reference's does
     Box(
@@ -98,7 +101,7 @@ fun AppRoot(vm: AppViewModel, onBrowse: () -> Unit, onPickSignatureImage: () -> 
     ) {
         when {
             doc != null -> ViewerScreen(vm, doc)
-            else -> HomeRoot(vm, onBrowse)
+            else -> Box(Modifier.fillMaxSize().glassSource(glass)) { HomeRoot(vm, onBrowse) }
         }
         // here rather than in the file's row: a sheet inside a scrolling list has no height to fill
         if (doc == null) vm.fileSheet?.let { (r, recent) -> io.github.artcraftandroid.pdfcraft.ui.home.FileSheet(vm, r, recent) { vm.fileSheet = null } }
@@ -108,7 +111,8 @@ fun AppRoot(vm: AppViewModel, onBrowse: () -> Unit, onPickSignatureImage: () -> 
         if (vm.showLicences) LicencesScreen(vm)
 
         if (vm.opening) CircularProgressIndicator(Modifier.align(Alignment.Center), color = c.accent)
-        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 72.dp, start = 8.dp, end = 8.dp))
+        // clear of the viewer's floating bottom bubble as well as the home tab bar
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 84.dp, start = FloatSide, end = FloatSide)) { GlassSnackbar(it) }
 
         vm.passwordRequest?.let { PasswordDialog(vm, it) }
         if (vm.authorPrompt) {
@@ -156,6 +160,7 @@ fun AppRoot(vm: AppViewModel, onBrowse: () -> Unit, onPickSignatureImage: () -> 
                 }
             }
         }
+    }
     }
 }
 

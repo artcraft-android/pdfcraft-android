@@ -1,5 +1,6 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -115,7 +116,7 @@ fun CommentPanel(vm: AppViewModel, doc: OpenDocument, c: CommentInfo) {
                 if (canEdit && c.color != null && c.subtype != "Text" && c.subtype != "Sound") {
                     Box(
                         Modifier.align(Alignment.CenterEnd).padding(end = 16.dp).size(40.dp)
-                            .then(if (palette) Modifier.background(colors.pressed, RoundedCornerShape(5.dp)) else Modifier)
+                            .then(if (palette) Modifier.background(colors.pressed, PdfShapes.Small) else Modifier)
                             .clickable { palette = !palette },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -207,7 +208,7 @@ fun CommentPanel(vm: AppViewModel, doc: OpenDocument, c: CommentInfo) {
                 // the reply box: an outlined field with the send arrow after a short divider
                 Row(
                     Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp).heightIn(min = 40.dp)
-                        .border(1.dp, colors.replyBorder, RoundedCornerShape(5.dp)).padding(start = 10.dp),
+                        .border(1.dp, colors.replyBorder, PdfShapes.Small).padding(start = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BasicTextField(

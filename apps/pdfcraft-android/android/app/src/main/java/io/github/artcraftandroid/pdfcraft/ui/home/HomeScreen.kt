@@ -1,5 +1,6 @@
 package io.github.artcraftandroid.pdfcraft.ui.home
 
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import io.github.artcraftandroid.pdfcraft.ui.safeTopPadding
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -285,7 +286,7 @@ private fun CarouselTile(icon: ImageVector, label: String, hue: Color, onClick: 
     val c = pdfColors
     // 64 dp tiles 16 dp apart, the tool's hue faint behind its icon, an 11 sp name under it
     Column(Modifier.width(64.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 8.dp).semantics { contentDescription = label }, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp).clip(RoundedCornerShape(5.dp)).background(tint(hue, c.dark)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(64.dp).clip(PdfShapes.Small).background(tint(hue, c.dark)), contentAlignment = Alignment.Center) {
             Icon(icon, null, tint = hue, modifier = Modifier.size(32.dp))
         }
         Spacer(Modifier.height(8.dp))
@@ -336,7 +337,7 @@ fun FileThumb(vm: AppViewModel, path: String?, width: Int, height: Int) {
         if (path != null) img = withContext(Dispatchers.IO) { vm.thumbnails.of(path)?.asImageBitmap() }
     }
     val c = pdfColors
-    Box(Modifier.size(width.dp, height.dp).clip(RoundedCornerShape(4.dp)).background(if (img != null) Color.White else c.surfaceRaised).border(1.dp, c.divider, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(width.dp, height.dp).clip(PdfShapes.Thumb).background(if (img != null) Color.White else c.surfaceRaised).border(1.dp, c.divider, PdfShapes.Thumb), contentAlignment = Alignment.Center) {
         val i = img
         if (i != null) Image(i, null, modifier = Modifier.size(width.dp, height.dp), contentScale = ContentScale.Crop) else PdfBadge((width * 0.55f).toInt())
     }

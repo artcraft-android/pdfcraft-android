@@ -1,5 +1,8 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
+import io.github.artcraftandroid.pdfcraft.ui.GLASS_PANEL_ALPHA
+import io.github.artcraftandroid.pdfcraft.ui.floatingSurface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,7 +45,6 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -123,7 +125,7 @@ fun EditToolbar(vm: AppViewModel, doc: OpenDocument) {
 private fun EditToolsBar(vm: AppViewModel, doc: OpenDocument) {
     Row(
         // taller when a large font setting enlarges the labels, rather than cutting them off
-        Modifier.fillMaxWidth().heightIn(min = BottomBarHeight).barTopLine().background(pdfColors.surface),
+        Modifier.heightIn(min = ToolBarContentHeight),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -153,7 +155,7 @@ private fun BarDividerLine() {
 private fun EditBarItem(icon: ImageVector, label: String, selected: Boolean, width: Dp, onClick: () -> Unit) {
     val c = pdfColors
     Column(
-        Modifier.width(width).heightIn(min = BottomBarHeight).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = label },
+        Modifier.width(width).heightIn(min = ToolBarContentHeight).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -170,7 +172,7 @@ private fun EditFormatBar(vm: AppViewModel, doc: OpenDocument, para: Paragraph) 
     fun toggle(p: FormatPanel) {
         panel = if (panel == p) FormatPanel.None else p
     }
-    Column(Modifier.fillMaxWidth().background(c.surface)) {
+    Column {
         when (panel) {
             FormatPanel.Size -> SizePanel(para) { vm.styleParagraph(doc, para, mapOf("size" to it.toDouble())) }
             FormatPanel.Font -> FontPanel(vm.editFont[para.page to para.number]) { f ->
@@ -186,7 +188,7 @@ private fun EditFormatBar(vm: AppViewModel, doc: OpenDocument, para: Paragraph) 
             FormatPanel.None -> Unit
         }
         Row(
-            Modifier.fillMaxWidth().height(BottomBarHeight).barTopLine(),
+            Modifier.height(ToolBarContentHeight),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -445,7 +447,7 @@ private fun BoxScope.SelectedParagraph(vm: AppViewModel, doc: OpenDocument, para
     }
 }
 
-/** The dark menu the reference floats over a selection: centred above it, or below when there's no room. */
+/** The menu floats above a selection, or below when there is no room. */
 @Composable
 private fun BoxScope.FloatingMenu(a: Offset, b: Offset, top: Float, content: @Composable () -> Unit) {
     val density = LocalDensity.current
@@ -456,7 +458,7 @@ private fun BoxScope.FloatingMenu(a: Offset, b: Offset, top: Float, content: @Co
     val y = if (above > top) above else b.y + gap
     Row(
         Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.onSizeChanged { menu = it }
-            .shadow(6.dp, RoundedCornerShape(4.dp)).background(Color(0xFF303030), RoundedCornerShape(4.dp)).height(48.dp),
+            .floatingSurface(PdfShapes.Small, alpha = GLASS_PANEL_ALPHA).height(48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) { content() }
 }
@@ -464,20 +466,20 @@ private fun BoxScope.FloatingMenu(a: Offset, b: Offset, top: Float, content: @Co
 @Composable
 private fun MenuText(label: String, onClick: () -> Unit) {
     Box(Modifier.fillMaxHeightRow().clickable(onClick = onClick).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-        Text(label, color = Color.White, fontSize = 15.sp)
+        Text(label, color = pdfColors.text, fontSize = 15.sp)
     }
 }
 
 @Composable
 private fun MenuIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Box(Modifier.size(48.dp).clickable(onClick = onClick).semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(24.dp))
+        Icon(icon, null, tint = pdfColors.text, modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
 private fun MenuSplit() {
-    Box(Modifier.width(1.dp).height(48.dp).background(Color(0xFF4B4B4B)))
+    Box(Modifier.width(1.dp).height(48.dp).background(pdfColors.divider))
 }
 
 private fun Modifier.fillMaxHeightRow(): Modifier = this.height(48.dp)
@@ -561,7 +563,7 @@ private fun BoxScope.InlineEditor(vm: AppViewModel, doc: OpenDocument, para: Par
         if (typo != null) {
             Row(
                 Modifier.offset { IntOffset(a.x.roundToInt(), (a.y - 48.dp.toPx()).roundToInt()) }
-                    .background(Color(0xFF2C2C2C), androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).padding(horizontal = 4.dp),
+                    .background(Color(0xFF2C2C2C), PdfShapes.Small).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 for (word in typo.suggestions) {

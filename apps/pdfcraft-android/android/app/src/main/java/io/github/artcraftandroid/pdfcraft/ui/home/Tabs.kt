@@ -1,5 +1,6 @@
 package io.github.artcraftandroid.pdfcraft.ui.home
 
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import io.github.artcraftandroid.pdfcraft.ui.safeTopPadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -203,10 +204,10 @@ fun ToolsTab(vm: AppViewModel) {
         ) {
             items(tools.filter { cat == "All" || cat in it.categories }.sortedBy { t -> CategoryOrder[cat]?.indexOf(t.name)?.takeIf { it >= 0 } ?: Int.MAX_VALUE }) { t ->
                 Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.surface)
-                        .border(1.dp, c.divider, RoundedCornerShape(12.dp)).clickable(onClick = t.go).padding(16.dp).semantics { contentDescription = t.name },
+                    Modifier.fillMaxWidth().clip(PdfShapes.Medium).background(c.surface)
+                        .border(1.dp, c.divider, PdfShapes.Medium).clickable(onClick = t.go).padding(16.dp).semantics { contentDescription = t.name },
                 ) {
-                    Box(Modifier.size(64.dp).clip(RoundedCornerShape(5.dp)).background(tint(t.hue, c.dark)), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(64.dp).clip(PdfShapes.Small).background(tint(t.hue, c.dark)), contentAlignment = Alignment.Center) {
                         Icon(t.icon, null, tint = t.hue, modifier = Modifier.size(32.dp))
                     }
                     Spacer(Modifier.height(12.dp))

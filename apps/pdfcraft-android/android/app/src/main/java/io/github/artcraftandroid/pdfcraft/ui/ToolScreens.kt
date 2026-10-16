@@ -130,7 +130,7 @@ fun ToolScaffold(
 fun FileCard(name: String, size: Long?, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null) {
     val c = pdfColors
     Row(
-        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(RoundedCornerShape(8.dp)).background(c.surfaceRaised).padding(12.dp),
+        modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(PdfShapes.Medium).background(c.surfaceRaised).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PdfBadge()
@@ -208,7 +208,7 @@ fun OutlinedFileCard(vm: AppViewModel, doc: OpenDocument) {
         thumb = runCatching { withContext(eng.thumbnails) { eng.session.renderPage(doc.id, 0u, scale, null).toBitmap().asImageBitmap() } }.getOrNull()
     }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 24.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, c.divider, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp).clip(PdfShapes.Small).border(1.dp, c.divider, PdfShapes.Small).padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(34.dp, 40.dp).background(Color.White)) {
@@ -265,8 +265,8 @@ private fun PasswordField(label: String, value: String, onValue: (String) -> Uni
     var focused by remember { mutableStateOf(false) }
     Text(label, color = c.label, fontSize = 16.sp, modifier = Modifier.padding(start = 24.dp, top = 20.dp, bottom = 8.dp))
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(44.dp).clip(RoundedCornerShape(4.dp)).background(c.menu)
-            .border(if (focused) 2.dp else 1.dp, if (error) c.red else if (focused) c.toolAccent else c.divider, RoundedCornerShape(4.dp)).padding(start = 12.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(44.dp).clip(PdfShapes.Small).background(c.menu)
+            .border(if (focused) 2.dp else 1.dp, if (error) c.red else if (focused) c.toolAccent else c.divider, PdfShapes.Small).padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         androidx.compose.foundation.text.BasicTextField(
@@ -376,7 +376,7 @@ fun CreateSourcesScreen(vm: AppViewModel) {
 private fun SourceRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     val c = pdfColors
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(c.pressed), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(40.dp).clip(PdfShapes.Small).background(c.pressed), contentAlignment = Alignment.Center) {
             Icon(icon, null, tint = c.icon, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(16.dp))
@@ -680,9 +680,9 @@ fun ScanScreen(vm: AppViewModel) {
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             pages.forEachIndexed { i, p ->
-                Image(p.thumb, "Page ${i + 1}", modifier = Modifier.size(56.dp, 72.dp).clip(RoundedCornerShape(4.dp)).border(2.dp, if (i == current) c.accent else Color.Transparent, RoundedCornerShape(4.dp)).clickable { current = i }, contentScale = ContentScale.Crop)
+                Image(p.thumb, "Page ${i + 1}", modifier = Modifier.size(56.dp, 72.dp).clip(PdfShapes.Thumb).border(2.dp, if (i == current) c.accent else Color.Transparent, PdfShapes.Thumb).clickable { current = i }, contentScale = ContentScale.Crop)
             }
-            Box(Modifier.size(56.dp, 72.dp).clip(RoundedCornerShape(4.dp)).background(c.surfaceRaised).clickable { vm.takeScanPhoto() }.semantics { contentDescription = "Add page" }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(56.dp, 72.dp).clip(PdfShapes.Thumb).background(c.surfaceRaised).clickable { vm.takeScanPhoto() }.semantics { contentDescription = "Add page" }, contentAlignment = Alignment.Center) {
                 Icon(LucideIcons.Plus, null, tint = c.icon)
             }
         }

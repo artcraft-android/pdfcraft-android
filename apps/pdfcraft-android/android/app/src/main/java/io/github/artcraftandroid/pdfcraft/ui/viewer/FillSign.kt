@@ -1,5 +1,9 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.floatingSurface
+import io.github.artcraftandroid.pdfcraft.ui.GLASS_PANEL_ALPHA
+import io.github.artcraftandroid.pdfcraft.ui.FloatEdge
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import io.github.artcraftandroid.pdfcraft.ui.safeTopPadding
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -148,7 +152,7 @@ fun SignPanel(vm: AppViewModel, doc: OpenDocument, onDismiss: () -> Unit) {
     // read so the panel redraws when a saved signature is cleared or made
     val version = vm.signaturesChanged
     // over the Fill & Sign bar, which stays in view: two dashed boxes, Add signature and Add initials
-    PdfSheet(onDismiss = onDismiss, modifier = Modifier.padding(bottom = BottomBarHeight + 1.dp).navigationBarsPadding(), bottomBand = false) {
+    PdfSheet(onDismiss = onDismiss, modifier = Modifier.padding(bottom = BottomBarHeight + FloatEdge + BubbleInsetBottom + 6.dp).navigationBarsPadding(), bottomBand = false) {
         Spacer(Modifier.height(7.dp))
         for (initials in listOf(false, true)) {
             val file = vm.signatures.fileFor(initials)
@@ -237,7 +241,7 @@ fun SignaturePadScreen(vm: AppViewModel, pad: SignaturePad, onPickImage: () -> U
             TabChip("Image", imported != null) { onPickImage() }
         }
         Box(
-            Modifier.fillMaxWidth().weight(1f).padding(16.dp).clip(RoundedCornerShape(8.dp)).background(Color.White).border(1.dp, c.divider, RoundedCornerShape(8.dp))
+            Modifier.fillMaxWidth().weight(1f).padding(16.dp).clip(PdfShapes.Small).background(Color.White).border(1.dp, c.divider, PdfShapes.Small)
                 .onSizeChanged { size = it },
         ) {
             if (imported != null) {
@@ -337,7 +341,7 @@ fun androidx.compose.foundation.layout.BoxScope.FillElementMenu(vm: AppViewModel
     val menuY = with(density) { (a.y - 60.dp.toPx()).coerceAtLeast(doc.viewer.padTop) }
     Column(Modifier.offset { androidx.compose.ui.unit.IntOffset(a.x.toInt().coerceAtLeast(8), menuY.toInt()) }) {
         Row(
-            Modifier.background(colors.surface, RoundedCornerShape(8.dp)).padding(horizontal = 4.dp),
+            Modifier.floatingSurface(PdfShapes.Medium, tint = colors.surface, alpha = GLASS_PANEL_ALPHA).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BarIcon(LucideIcons.AArrowDown, "Smaller", { vm.scaleFill(doc, c, 1f / 1.2f) })
@@ -346,7 +350,7 @@ fun androidx.compose.foundation.layout.BoxScope.FillElementMenu(vm: AppViewModel
             BarIcon(LucideIcons.Trash2, "Delete", { vm.selectedFill = null; vm.deleteComment(doc, c) }, tint = colors.red)
         }
         if (palette) {
-            Row(Modifier.padding(top = 6.dp).background(colors.surface, RoundedCornerShape(8.dp)).padding(8.dp)) {
+            Row(Modifier.padding(top = 6.dp).floatingSurface(PdfShapes.Medium, tint = colors.surface, alpha = GLASS_PANEL_ALPHA).padding(8.dp)) {
                 for (col in listOf(Color.Black, Color(0xFF0000FF), Color(0xFFE52237), Color(0xFF6AD928))) {
                     Box(Modifier.padding(4.dp).size(28.dp).clip(androidx.compose.foundation.shape.CircleShape).background(col).clickable {
                         palette = false
