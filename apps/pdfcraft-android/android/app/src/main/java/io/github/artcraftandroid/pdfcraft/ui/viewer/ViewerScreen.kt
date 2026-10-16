@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -75,6 +76,7 @@ import kotlinx.coroutines.launch
  * hides and shows them, with the system bars), the scrubber and its page pill, Find, text
  * selection, the active tool's layer and sub-toolbar, and the sheets.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
     val c = pdfColors
@@ -103,18 +105,20 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
         }
     }
 
-    // The page area starts under the top bar while it shows, and leaves room for the bottom bar.
+    // The page area starts under the top bar and leaves room for the bottom bar. The room is the same
+    // whether the bars show or not (they hide as the reader scrolls: the pages must not jump), and
+    // the navigation bar's too, which hides with them.
     val statusPx = maxOf(WindowInsets.statusBars.getTop(density), WindowInsets.displayCutout.getTop(density)).toFloat()
-    val navPx = WindowInsets.navigationBars.getBottom(density).toFloat()
+    val navPx = WindowInsets.navigationBarsIgnoringVisibility.getBottom(density).toFloat()
     val topPx = with(density) { TopBarHeight.toPx() }
     // the quick toolbar grows with a large font setting: the page area leaves room for that too
     var quickExtraPx by remember { mutableIntStateOf(0) }
     val bottomPx = with(density) { if (ctl.tool == ViewerTool.None) QuickBarHeight.toPx() + quickExtraPx else BottomBarHeight.toPx() }
     // keyed on the document too: one opened over another (Create, Combine) has a fresh page view
-    LaunchedEffect(doc, ctl.barsVisible, statusPx, navPx, ctl.searching, ctl.tool, vm.readingMode, bottomPx) {
-        val bottomShown = ctl.barsVisible && !ctl.searching && !vm.readingMode
+    LaunchedEffect(doc, statusPx, navPx, ctl.searching, ctl.tool, vm.readingMode, bottomPx) {
+        val bottomShown = !ctl.searching && !vm.readingMode
         doc.viewer.setPadding(
-            top = if (ctl.barsVisible) statusPx + topPx else statusPx,
+            top = statusPx + topPx,
             bottom = if (bottomShown) bottomPx + navPx else navPx,
         )
     }
@@ -184,6 +188,7 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
             top = with(density) { (statusPx + topPx).toDp() },
             bottom = with(density) { doc.viewer.padBottom.toDp() },
             onTap = { ctl.toggleBars() },
+            onScroll = { dy, atTop -> ctl.onUserScroll(dy / density.density, atTop) },
         ) else PageCanvas(
             state = doc.viewer,
             images = doc.images,
@@ -191,6 +196,8 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
             look = canvasLook,
             gap = with(density) { (if (c.dark) 3f else 4f).toDp() },
             gesturesEnabled = gesturesForTool,
+            // the bars slip away as the reader scrolls on, and return as they scroll back (or reach the top)
+            onScroll = { dy -> ctl.onUserScroll(dy / density.density, doc.viewer.scrollY <= 8f) },
             onTap = { p, at ->
                 when {
                     selection.selection != null -> selection.clear()
