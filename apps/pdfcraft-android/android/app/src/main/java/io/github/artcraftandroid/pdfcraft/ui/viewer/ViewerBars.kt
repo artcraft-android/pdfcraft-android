@@ -1,6 +1,23 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.FloatEdge
+import io.github.artcraftandroid.pdfcraft.ui.floatingSurface
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import androidx.compose.foundation.background
+import android.os.Build
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -27,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -54,6 +72,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,6 +81,7 @@ import io.github.artcraftandroid.pdfcraft.ui.BarIcon
 import io.github.artcraftandroid.pdfcraft.ui.Inter
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
 import io.github.artcraftandroid.pdfcraft.ui.pdfColors
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
 
 /** The viewer's top bar height (the reference's: 56 dp). */
@@ -70,9 +90,19 @@ val TopBarHeight = 57.dp
 /** The bottom quick toolbar's height (the reference's: 70 dp). */
 val BottomBarHeight = 70.dp
 
+/** A tool's bar inside its bubble: the bubble's own top inset (see [BubbleInsetBottom]) comes out of the usual height, so the buttons sit centred. */
+val ToolBarContentHeight: Dp get() = BottomBarHeight - BubbleInsetBottom
+
+/** The room the pages leave under the top bubble: its height, the gap above it and a little air. */
+val TopBubbleReserve = TopBarHeight + FloatEdge + 6.dp
+
+/** The air inside the bottom bubble, so the end tools and the labels keep clear of its rounded corners. */
+val BubbleInsetX = 6.dp
+val BubbleInsetBottom = 10.dp
+
 /**
- * The top bar in plain viewing: back, a divider and the Read aloud switch, then Find, Share and
- * More. With a tool active the back arrow becomes a check mark (Done), the switch goes, and Undo
+ * The top bar in plain viewing, as two floating pills: back, a divider and the Read aloud switch on the
+ * left; Find, Share and More on the right. With a tool active the back arrow becomes a check mark (Done), the switch goes, and Undo
  * and Redo appear once there is something to undo.
  */
 @Composable
@@ -97,13 +127,7 @@ fun ViewerTopBar(
     redoLabel: String? = null,
 ) {
     val c = pdfColors
-    Row(
-        Modifier.fillMaxWidth().height(TopBarHeight).background(c.surface).drawBehind {
-            val line = 1.dp.toPx()
-            drawRect(c.divider, Offset(0f, size.height - line), androidx.compose.ui.geometry.Size(size.width, line))
-        }.padding(bottom = 1.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    val back: @Composable () -> Unit = {
         Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) {
             if (toolActive && doneIsCheck) {
                 BarIcon(LucideIcons.Check, "Done", onBack, tint = c.toolAccent)
@@ -111,37 +135,50 @@ fun ViewerTopBar(
                 BarIcon(LucideIcons.ArrowLeft, "Back", onBack, iconSize = 27.dp)
             }
         }
-        if (title != null) {
-            Spacer(Modifier.width(6.dp))
-            Text(title, color = c.label, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            UndoMenuButton(canUndo, canRedo, onUndo, onRedo, undoLabel, redoLabel)
-            Spacer(Modifier.width(10.dp))
-            return@Row
+    }
+    // a tool with its own title: Done and the title in one pill, Undo in another, each only as wide as its content
+    if (title != null) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.height(TopBarHeight).floatingSurface(), verticalAlignment = Alignment.CenterVertically) {
+                back()
+                Text(title, color = c.label, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                Spacer(Modifier.width(20.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.height(TopBarHeight).floatingSurface().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                UndoMenuButton(canUndo, canRedo, onUndo, onRedo, undoLabel, redoLabel)
+            }
         }
-        if (!toolActive) {
-            BarDivider(height = 24.dp)
-            Spacer(Modifier.width(14.dp))
-            // with something to undo the reference shrinks the switch to a plain speaker button
-            if (canUndo && !readingAloud) BarIcon(LucideIcons.Volume2, "Read aloud", onReadAloud) else ReadAloudSwitch(readingAloud, onReadAloud)
+        return
+    }
+    // otherwise two pills: where you are (back, Read aloud) on the left, what you can do on the right
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.height(TopBarHeight).floatingSurface(), verticalAlignment = Alignment.CenterVertically) {
+            back()
+            if (!toolActive) {
+                BarDivider(height = 24.dp)
+                Spacer(Modifier.width(14.dp))
+                // with something to undo the reference shrinks the switch to a plain speaker button
+                if (canUndo && !readingAloud) BarIcon(LucideIcons.Volume2, "Read aloud", onReadAloud) else ReadAloudSwitch(readingAloud, onReadAloud)
+                Spacer(Modifier.width(10.dp))
+            }
         }
         Spacer(Modifier.weight(1f))
-        // while reading aloud the bar holds only back and the switch, as the reference's
-        if (readingAloud && !toolActive) {
-            Spacer(Modifier.width(10.dp))
-            return@Row
-        }
-        if (toolActive) {
-            if (canUndo || canRedo) {
-                BarIcon(LucideIcons.Undo2, "Undo", onUndo, enabled = canUndo)
-                BarIcon(LucideIcons.Redo2, "Redo", onRedo, enabled = canRedo)
+        // while reading aloud only the left pill stays, as the reference's bar holds only back and the switch
+        if (readingAloud && !toolActive) return@Row
+        Row(Modifier.height(TopBarHeight).floatingSurface().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (toolActive) {
+                if (canUndo || canRedo) {
+                    BarIcon(LucideIcons.Undo2, "Undo", onUndo, enabled = canUndo)
+                    BarIcon(LucideIcons.Redo2, "Redo", onRedo, enabled = canRedo)
+                }
+            } else if (canUndo) {
+                UndoMenuButton(canUndo, canRedo, onUndo, onRedo, undoLabel, redoLabel)
             }
-        } else if (canUndo) {
-            UndoMenuButton(canUndo, canRedo, onUndo, onRedo, undoLabel, redoLabel)
+            if (onSearch != null) BarIcon(LucideIcons.Search, "Find in document", onSearch)
+            BarIcon(LucideIcons.Share2, "Share", onShare)
+            BarIcon(LucideIcons.EllipsisVertical, "More options", onMore, selected = moreOpen)
         }
-        if (onSearch != null) BarIcon(LucideIcons.Search, "Find in document", onSearch)
-        BarIcon(LucideIcons.Share2, "Share", onShare)
-        BarIcon(LucideIcons.EllipsisVertical, "More options", onMore, selected = moreOpen)
-        Spacer(Modifier.width(10.dp))
     }
 }
 
@@ -202,6 +239,7 @@ private fun ReadAloudSwitch(on: Boolean, onToggle: () -> Unit) {
  */
 @Composable
 fun SearchBar(
+    modifier: Modifier = Modifier,
     query: String,
     onQuery: (String) -> Unit,
     canStep: Boolean,
@@ -216,10 +254,7 @@ fun SearchBar(
     val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(Unit) { focus.requestFocus() }
     Row(
-        Modifier.fillMaxWidth().height(TopBarHeight).background(c.surface).drawBehind {
-            val line = 1.dp.toPx()
-            drawRect(c.divider, Offset(0f, size.height - line), androidx.compose.ui.geometry.Size(size.width, line))
-        }.padding(bottom = 1.dp),
+        modifier.fillMaxWidth().height(TopBarHeight),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, "Collapse", onClose, iconSize = 27.dp) }
@@ -272,7 +307,7 @@ private fun QuickItem(icon: ImageVector, label: String, onClick: () -> Unit, sub
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            Modifier.size(44.dp).offset(y = 2.5.dp).background(if (selected) c.divider else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(4.dp)),
+            Modifier.size(44.dp).offset(y = 2.5.dp).background(if (selected) c.divider else Color.Transparent, PdfShapes.Small),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, null, tint = c.icon, modifier = Modifier.size(24.dp))
@@ -298,6 +333,9 @@ private fun QuickItem(icon: ImageVector, label: String, onClick: () -> Unit, sub
 /** The strip above the quick toolbar's tools that holds its handle. */
 val QuickHandleHeight = 22.dp
 
+/** The handle's touch target: wide enough to hit, narrower than the smallest bar (More alone). */
+private val QuickHandleWidth = 72.dp
+
 /** The quick toolbar's height with its handle, the shortcuts folded away. */
 val QuickBarHeight = BottomBarHeight + QuickHandleHeight
 
@@ -321,12 +359,14 @@ fun QuickToolbar(
 ) {
     val c = pdfColors
     var open by remember { androidx.compose.runtime.mutableStateOf(false) }
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().background(c.surface)) {
+    // the bubble is as wide as the tools in it (fewer pinned shortcuts, a narrower pill); the shortcut chips follow that width
+    var toolsWidthPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.foundation.layout.BoxWithConstraints {
         val slots = toolbarSlots(androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp)
         val shown = tools.take(slots)
-        val itemW = minOf(72.dp, (maxWidth - 16.dp) / maxOf(7, shown.size + 1))
+        val itemW = minOf(72.dp, (maxWidth - 4.dp) / maxOf(7, shown.size + 1))
         Column(
-            Modifier.fillMaxWidth().pointerInput(chips.isNotEmpty()) {
+            Modifier.pointerInput(chips.isNotEmpty()) {
                 if (chips.isEmpty()) return@pointerInput
                 var pulled = 0f
                 detectVerticalDragGestures(
@@ -336,30 +376,31 @@ fun QuickToolbar(
             },
         ) {
             Box(
-                Modifier.fillMaxWidth().height(QuickHandleHeight)
+                Modifier.align(Alignment.CenterHorizontally).width(QuickHandleWidth).height(QuickHandleHeight)
                     .clickable(enabled = chips.isNotEmpty(), role = Role.Button) { open = !open }
                     .semantics { contentDescription = if (open) "Hide shortcuts" else "Show shortcuts" },
                 contentAlignment = Alignment.TopCenter,
             ) {
                 // measured on the dark bar; the light bar's grey is our own match
-                val handle = if (c.dark) Color(0xFF6A6A6A) else Color(0xFFC4C4C4)
+                val handle = if (c.dark) Color(0xFFA6A6A6) else Color(0xFFC4C4C4)
                 Box(Modifier.padding(top = 15.dp).size(40.dp, 4.dp).background(handle, androidx.compose.foundation.shape.RoundedCornerShape(2.dp)))
             }
             androidx.compose.animation.AnimatedVisibility(open && chips.isNotEmpty()) {
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())
+                    Modifier.then(if (toolsWidthPx > 0) Modifier.width(with(androidx.compose.ui.platform.LocalDensity.current) { toolsWidthPx.toDp() }) else Modifier.fillMaxWidth())
+                        .horizontalScroll(androidx.compose.foundation.rememberScrollState())
                         .padding(start = 18.dp, end = 18.dp, top = 5.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(11.dp),
                 ) { for (chip in chips) QuickChipView(chip) }
             }
             val usual = with(androidx.compose.ui.platform.LocalDensity.current) { BottomBarHeight.roundToPx() }
             Row(
-                Modifier.fillMaxWidth().heightIn(min = BottomBarHeight)
-                    .onSizeChanged { onExtraHeight((it.height - usual).coerceAtLeast(0)) },
+                Modifier.heightIn(min = BottomBarHeight)
+                    .onSizeChanged { toolsWidthPx = it.width; onExtraHeight((it.height - usual).coerceAtLeast(0)) },
                 horizontalArrangement = Arrangement.Center,
             ) {
                 for (t in shown) QuickItem(t.icon, t.label, { onTool(t) }, subTools = t.subTools, width = itemW)
-                QuickItem(LucideIcons.LayoutGrid, "More tools", onMoreTools, selected = moreToolsOpen, width = itemW)
+                QuickItem(LucideIcons.LayoutGrid, "More", onMoreTools, selected = moreToolsOpen, width = itemW)
             }
         }
     }
@@ -401,13 +442,10 @@ fun Modifier.barTopLine(): Modifier {
 @Composable
 fun SubToolbar(content: @Composable () -> Unit) {
     val scroll = androidx.compose.foundation.rememberScrollState()
-    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(BottomBarHeight).barTopLine().background(pdfColors.surface)) {
-        Row(
-            Modifier.fillMaxHeight().horizontalScroll(scroll).widthIn(min = maxWidth),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) { androidx.compose.runtime.CompositionLocalProvider(LocalSubToolbarScroll provides scroll) { content() } }
-    }
+    Row(
+        Modifier.height(ToolBarContentHeight).horizontalScroll(scroll),
+        verticalAlignment = Alignment.CenterVertically,
+    ) { androidx.compose.runtime.CompositionLocalProvider(LocalSubToolbarScroll provides scroll) { content() } }
 }
 
 /** The scrolling bar a sub-toolbar tool sits in (none outside one). */
@@ -478,7 +516,7 @@ private fun SubButton(icon: ImageVector, description: String, selected: Boolean,
         Modifier.width(width).height(54.dp).slideToWhenChosen(selected && !shaded).clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        if (shaded && selected) Box(Modifier.requiredSize(40.dp).background(c.pressed, androidx.compose.foundation.shape.RoundedCornerShape(5.dp)))
+        if (shaded && selected) Box(Modifier.requiredSize(40.dp).background(c.pressed, PdfShapes.Small))
         Icon(icon, null, tint = if (enabled) tint else tint.copy(alpha = 0.38f), modifier = Modifier.size(24.dp))
     }
 }
@@ -497,7 +535,7 @@ fun ColorDot(color: androidx.compose.ui.graphics.Color, selected: Boolean, onCli
         Modifier.width(36.dp).height(54.dp).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = "Colour" },
         contentAlignment = Alignment.Center,
     ) {
-        if (selected) Box(Modifier.requiredSize(40.dp).background(c.pressed, androidx.compose.foundation.shape.RoundedCornerShape(5.dp)))
+        if (selected) Box(Modifier.requiredSize(40.dp).background(c.pressed, PdfShapes.Small))
         Box(Modifier.size(20.dp).background(color, androidx.compose.foundation.shape.CircleShape))
     }
 }

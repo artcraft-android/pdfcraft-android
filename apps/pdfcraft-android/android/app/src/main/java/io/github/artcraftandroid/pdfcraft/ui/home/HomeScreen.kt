@@ -1,5 +1,8 @@
 package io.github.artcraftandroid.pdfcraft.ui.home
 
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
+import io.github.artcraftandroid.pdfcraft.ui.GlassSource
+import io.github.artcraftandroid.pdfcraft.ui.glassSource
 import io.github.artcraftandroid.pdfcraft.ui.safeTopPadding
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -96,19 +99,33 @@ data class FileRow(
 
 /** The app outside the viewer: the current tab's screen over the bottom bar. */
 @Composable
-fun HomeRoot(vm: AppViewModel, onBrowse: () -> Unit) {
+fun HomeRoot(vm: AppViewModel, onBrowse: () -> Unit, glass: GlassSource) {
     val c = pdfColors
+    var fabMenu by remember { mutableStateOf(false) }
     // Home and its tabs sit on the reference's home background: white, or black in dark mode
-    Column(Modifier.fillMaxSize().background(c.home)) {
-        Box(Modifier.weight(1f)) {
-            when (vm.homeTab) {
-                HomeTab.Home -> HomeTabScreen(vm, onBrowse)
-                HomeTab.Files -> FilesTab(vm, onBrowse)
-                HomeTab.Tools -> ToolsTab(vm)
-                HomeTab.Search -> SearchTab(vm)
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().background(c.home).glassSource(glass)) {
+            Box(Modifier.weight(1f)) {
+                when (vm.homeTab) {
+                    HomeTab.Home -> HomeTabScreen(vm, onBrowse) { fabMenu = true }
+                    HomeTab.Files -> FilesTab(vm, onBrowse)
+                    HomeTab.Tools -> ToolsTab(vm)
+                    HomeTab.Search -> SearchTab(vm)
+                }
+            }
+            BottomNav(vm.homeTab) { vm.homeTab = it }
+        }
+        if (fabMenu) {
+            PdfSheet(onDismiss = { fabMenu = false }, dim = true) {
+                SheetRow(LucideIcons.FolderOpen, "Open file", { fabMenu = false; onBrowse() })
+                SheetRow(LucideIcons.Camera, "New scan", { fabMenu = false; vm.startScan() })
+                SheetDivider()
+                SheetRow(LucideIcons.FilePenLine, "Edit PDF", { fabMenu = false; vm.toolForFile(FileTool.Edit) })
+                SheetRow(LucideIcons.FilePlus2, "Create PDF", { fabMenu = false; vm.openCreate() })
+                SheetRow(LucideIcons.Combine, "Combine files", { fabMenu = false; vm.pickFiles(io.github.artcraftandroid.pdfcraft.ui.FilePickKind.Combine) })
+                Spacer(Modifier.height(12.dp))
             }
         }
-        BottomNav(vm.homeTab) { vm.homeTab = it }
     }
 }
 
@@ -143,10 +160,9 @@ private fun BottomNav(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
 
 /** Home: the app's name and Settings, a welcome, the tools carousel, then Recent, Starred and On device. */
 @Composable
-private fun HomeTabScreen(vm: AppViewModel, onBrowse: () -> Unit) {
+private fun HomeTabScreen(vm: AppViewModel, onBrowse: () -> Unit, onOpenFab: () -> Unit) {
     val c = pdfColors
     var tab by remember { mutableStateOf(0) }
-    var fabMenu by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var confirmDeleteSelected by remember { mutableStateOf(false) }
@@ -234,23 +250,12 @@ private fun HomeTabScreen(vm: AppViewModel, onBrowse: () -> Unit) {
             }
         }
         FloatingActionButton(
-            onClick = { fabMenu = true },
+            onClick = onOpenFab,
             containerColor = c.button,
             contentColor = Color.White,
             shape = CircleShape,
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).semantics { contentDescription = "Tools" },
         ) { Icon(LucideIcons.Plus, null, modifier = Modifier.size(26.dp)) }
-    }
-    if (fabMenu) {
-        PdfSheet(onDismiss = { fabMenu = false }, dim = true) {
-            SheetRow(LucideIcons.FolderOpen, "Open file", { fabMenu = false; onBrowse() })
-            SheetRow(LucideIcons.Camera, "New scan", { fabMenu = false; vm.startScan() })
-            SheetDivider()
-            SheetRow(LucideIcons.FilePenLine, "Edit PDF", { fabMenu = false; vm.toolForFile(FileTool.Edit) })
-            SheetRow(LucideIcons.FilePlus2, "Create PDF", { fabMenu = false; vm.openCreate() })
-            SheetRow(LucideIcons.Combine, "Combine files", { fabMenu = false; vm.pickFiles(io.github.artcraftandroid.pdfcraft.ui.FilePickKind.Combine) })
-            Spacer(Modifier.height(12.dp))
-        }
     }
     if (confirmClear) {
         io.github.artcraftandroid.pdfcraft.ui.PdfDialog(
@@ -285,7 +290,7 @@ private fun CarouselTile(icon: ImageVector, label: String, hue: Color, onClick: 
     val c = pdfColors
     // 64 dp tiles 16 dp apart, the tool's hue faint behind its icon, an 11 sp name under it
     Column(Modifier.width(64.dp).clickable(role = Role.Button, onClick = onClick).padding(vertical = 8.dp).semantics { contentDescription = label }, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp).clip(RoundedCornerShape(5.dp)).background(tint(hue, c.dark)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(64.dp).clip(PdfShapes.Small).background(tint(hue, c.dark)), contentAlignment = Alignment.Center) {
             Icon(icon, null, tint = hue, modifier = Modifier.size(32.dp))
         }
         Spacer(Modifier.height(8.dp))
@@ -336,7 +341,7 @@ fun FileThumb(vm: AppViewModel, path: String?, width: Int, height: Int) {
         if (path != null) img = withContext(Dispatchers.IO) { vm.thumbnails.of(path)?.asImageBitmap() }
     }
     val c = pdfColors
-    Box(Modifier.size(width.dp, height.dp).clip(RoundedCornerShape(4.dp)).background(if (img != null) Color.White else c.surfaceRaised).border(1.dp, c.divider, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(width.dp, height.dp).clip(PdfShapes.Thumb).background(if (img != null) Color.White else c.surfaceRaised).border(1.dp, c.divider, PdfShapes.Thumb), contentAlignment = Alignment.Center) {
         val i = img
         if (i != null) Image(i, null, modifier = Modifier.size(width.dp, height.dp), contentScale = ContentScale.Crop) else PdfBadge((width * 0.55f).toInt())
     }

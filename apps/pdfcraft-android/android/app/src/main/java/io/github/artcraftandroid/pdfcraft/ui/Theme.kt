@@ -3,6 +3,7 @@ package io.github.artcraftandroid.pdfcraft.ui
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -185,6 +186,6 @@ fun PdfcraftTheme(choice: ThemeChoice = ThemeChoice.System, content: @Composable
         labelSmall = TextStyle(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp),
     )
     CompositionLocalProvider(LocalPdfColors provides c) {
-        MaterialTheme(colorScheme = scheme, typography = typography, content = content)
+        MaterialTheme(colorScheme = scheme, typography = typography, shapes = Shapes(extraSmall = PdfShapes.Medium), content = content)
     }
 }

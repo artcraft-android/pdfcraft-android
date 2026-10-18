@@ -71,6 +71,8 @@ fun PageCanvas(
     onLongPress: (Offset, PagePoint?) -> Unit = { _, _ -> },
     onDoubleTap: () -> Unit = {},
     onGestureStart: () -> Unit = {},
+    /** The reader scrolled the pages by this many pixels vertically (a finger drag or a fling; a pinch is not). */
+    onScroll: (Float) -> Unit = {},
     overlay: DrawScope.() -> Unit = {},
 ) {
     val density = LocalDensity.current
@@ -144,7 +146,11 @@ fun PageCanvas(
                                 val c = event.calculateCentroid()
                                 if (zoomChange != 1f) state.zoomBy(zoomChange, c)
                             }
-                            if (pan != Offset.Zero) state.scrollBy(pan.x, pan.y)
+                            if (pan != Offset.Zero) {
+                                val left = state.scrollBy(pan.x, pan.y)
+                                // only what the page really moved: a drag against its end isn't a scroll
+                                if (pressed.size == 1) onScroll(pan.y - left.y)
+                            }
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                         }
                         lastChange = pressed.first()
@@ -153,7 +159,7 @@ fun PageCanvas(
                     if (!started) return@awaitEachGesture
                     val v = tracker.calculateVelocity()
                     val velocity = if (pinched) Offset.Zero else Offset(v.x, v.y)
-                    flinger[0] = scope.launch { settle(state, velocity, density.density) }
+                    flinger[0] = scope.launch { settle(state, velocity, density.density, onScroll) }
                 }
             },
     ) {
@@ -168,7 +174,7 @@ fun PageCanvas(
 }
 
 /** After a gesture: fling (with decay), or in single-page mode come to rest on a page. */
-private suspend fun settle(state: ViewerState, velocity: Offset, density: Float) {
+private suspend fun settle(state: ViewerState, velocity: Offset, density: Float, onScroll: (Float) -> Unit) {
     if (state.mode == PageMode.SinglePage && state.zoom <= 1.01f) {
         val target = state.snapTarget(velocity.x)
         val anim = Animatable(state.scrollX)
@@ -182,6 +188,7 @@ private suspend fun settle(state: ViewerState, velocity: Offset, density: Float)
         val d = value - last
         last = value
         val left = state.scrollBy(d.x, d.y)
+        onScroll(d.y - left.y)
         // stop at the ends instead of decaying against them
         if (abs(left.x) > 0.5f && abs(left.y) > 0.5f) throw CancellationException("at the edge")
     }

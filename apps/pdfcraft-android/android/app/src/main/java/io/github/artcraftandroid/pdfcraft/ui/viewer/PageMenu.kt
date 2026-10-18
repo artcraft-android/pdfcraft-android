@@ -1,5 +1,8 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.floatingSurface
+import io.github.artcraftandroid.pdfcraft.ui.GLASS_PANEL_ALPHA
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -25,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -71,8 +73,7 @@ fun PageMenuView(vm: AppViewModel, menu: PageMenu) {
                 .offset { IntOffset(x.roundToInt(), y.roundToInt()) }
                 .onSizeChanged { size = it }
                 .width(209.dp)
-                .shadow(6.dp, RoundedCornerShape(4.dp))
-                .background(c.menu, RoundedCornerShape(4.dp))
+                .floatingSurface(PdfShapes.Medium, tint = c.menu, alpha = GLASS_PANEL_ALPHA)
                 .pointerInput(Unit) { detectTapGestures { } },
         ) {
             Row(Modifier.fillMaxWidth().height(61.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {

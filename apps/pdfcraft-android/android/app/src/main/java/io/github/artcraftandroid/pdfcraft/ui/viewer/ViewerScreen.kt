@@ -1,5 +1,12 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.FloatSide
+import io.github.artcraftandroid.pdfcraft.ui.FloatEdge
+import io.github.artcraftandroid.pdfcraft.ui.floatingSurface
+import io.github.artcraftandroid.pdfcraft.ui.glassSource
+import io.github.artcraftandroid.pdfcraft.ui.LocalGlassSource
+import io.github.artcraftandroid.pdfcraft.ui.rememberGlassSource
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import android.app.Activity
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
@@ -17,6 +24,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -75,6 +84,7 @@ import kotlinx.coroutines.launch
  * hides and shows them, with the system bars), the scrubber and its page pill, Find, text
  * selection, the active tool's layer and sub-toolbar, and the sheets.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
     val c = pdfColors
@@ -84,37 +94,45 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
     val view = LocalView.current
     val context = LocalContext.current
 
-    // The system bars go with the viewer's bars.
-    DisposableEffect(ctl.barsVisible) {
+    // The status bar stays hidden for as long as a document is open. Set up once: tying it to the bars
+    // (as the navigation bar is, below) re-showed the system bars each time they toggled, and the
+    // status bar flashed in as the pills came back.
+    DisposableEffect(Unit) {
         val window = (context as? Activity)?.window
         if (window != null) {
             val insets = WindowCompat.getInsetsController(window, view)
             insets.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            // the status bar stays hidden in the viewer (a black band where the camera is), as the
-            // reference's; the navigation bar comes and goes with the viewer's bars
+            // the document shows where the status bar would be (no black band around the camera)
             insets.hide(WindowInsetsCompat.Type.statusBars())
-            if (ctl.barsVisible) insets.show(WindowInsetsCompat.Type.navigationBars()) else insets.hide(WindowInsetsCompat.Type.navigationBars())
-            // light status icons on the black band, as the reference has in both themes
-            insets.isAppearanceLightStatusBars = false
-            insets.isAppearanceLightNavigationBars = !c.dark
         }
         onDispose {
             if (window != null) WindowCompat.getInsetsController(window, view).show(WindowInsetsCompat.Type.systemBars())
         }
     }
+    // The navigation bar comes and goes with the viewer's bars.
+    LaunchedEffect(ctl.barsVisible, c.dark) {
+        val window = (context as? Activity)?.window ?: return@LaunchedEffect
+        val insets = WindowCompat.getInsetsController(window, view)
+        if (ctl.barsVisible) insets.show(WindowInsetsCompat.Type.navigationBars()) else insets.hide(WindowInsetsCompat.Type.navigationBars())
+        // the icons of a swiped-in status bar sit over the document's surround
+        insets.isAppearanceLightStatusBars = !c.dark
+        insets.isAppearanceLightNavigationBars = !c.dark
+    }
 
-    // The page area starts under the top bar while it shows, and leaves room for the bottom bar.
+    // The pages start below the top bubble and leave room under the bottom one. The room is the same
+    // whether the bubbles show or not (they hide as the reader scrolls: the pages must not jump), and
+    // the navigation bar's too, which hides with them.
     val statusPx = maxOf(WindowInsets.statusBars.getTop(density), WindowInsets.displayCutout.getTop(density)).toFloat()
-    val navPx = WindowInsets.navigationBars.getBottom(density).toFloat()
-    val topPx = with(density) { TopBarHeight.toPx() }
+    val navPx = WindowInsets.navigationBarsIgnoringVisibility.getBottom(density).toFloat()
+    val topPx = with(density) { TopBubbleReserve.toPx() }
     // the quick toolbar grows with a large font setting: the page area leaves room for that too
     var quickExtraPx by remember { mutableIntStateOf(0) }
-    val bottomPx = with(density) { if (ctl.tool == ViewerTool.None) QuickBarHeight.toPx() + quickExtraPx else BottomBarHeight.toPx() }
+    val bottomPx = with(density) { (if (ctl.tool == ViewerTool.None) QuickBarHeight.toPx() + quickExtraPx else BottomBarHeight.toPx()) + FloatEdge.toPx() + BubbleInsetBottom.toPx() }
     // keyed on the document too: one opened over another (Create, Combine) has a fresh page view
-    LaunchedEffect(doc, ctl.barsVisible, statusPx, navPx, ctl.searching, ctl.tool, vm.readingMode, bottomPx) {
-        val bottomShown = ctl.barsVisible && !ctl.searching && !vm.readingMode
+    LaunchedEffect(doc, statusPx, navPx, topPx, ctl.searching, ctl.tool, vm.readingMode, bottomPx) {
+        val bottomShown = !ctl.searching && !vm.readingMode
         doc.viewer.setPadding(
-            top = if (ctl.barsVisible) statusPx + topPx else statusPx,
+            top = statusPx + topPx,
             bottom = if (bottomShown) bottomPx + navPx else navPx,
         )
     }
@@ -157,6 +175,8 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
 
     val search = doc.search
     val selection = doc.selection
+    // the app's glass source (Home and the viewer share it, so what floats above either frosts it)
+    val glass = LocalGlassSource.current ?: rememberGlassSource()
     val canvasLook = CanvasLook(background = c.desk, pageShadow = c.pageEdge, invert = ctl.nightMode)
 
     BackHandler(enabled = ctl.searching || ctl.tool != ViewerTool.None || selection.selection != null) {
@@ -168,6 +188,7 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
     }
 
     // a magnifier over the text while a selection handle is dragged, as the reference shows one
+    androidx.compose.runtime.CompositionLocalProvider(LocalGlassSource provides glass) {
     Box(
         Modifier.fillMaxSize().background(c.desk).magnifier(
             sourceCenter = { selection.magnifierAt ?: Offset.Unspecified },
@@ -184,13 +205,18 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
             top = with(density) { (statusPx + topPx).toDp() },
             bottom = with(density) { doc.viewer.padBottom.toDp() },
             onTap = { ctl.toggleBars() },
+            onScroll = { dy, atTop -> ctl.onUserScroll(dy / density.density, atTop) },
+            modifier = Modifier.background(c.desk).glassSource(glass),
         ) else PageCanvas(
+            modifier = Modifier.glassSource(glass),
             state = doc.viewer,
             images = doc.images,
             generation = doc.info.generation.toLong(),
             look = canvasLook,
             gap = with(density) { (if (c.dark) 3f else 4f).toDp() },
             gesturesEnabled = gesturesForTool,
+            // the bars slip away as the reader scrolls on, and return as they scroll back (or reach the top)
+            onScroll = { dy -> ctl.onUserScroll(dy / density.density, doc.viewer.scrollY <= 8f) },
             onTap = { p, at ->
                 when {
                     selection.selection != null -> selection.clear()
@@ -277,8 +303,8 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
             enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut(),
         ) {
             Row(
-                Modifier.height(32.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(5.dp)).background(Color(0xCCFFFFFF))
-                    .border(0.5.dp, Color(0xFFF5F5F5), androidx.compose.foundation.shape.RoundedCornerShape(5.dp))
+                Modifier.height(32.dp).clip(PdfShapes.Pill).background(Color(0xCCFFFFFF))
+                    .border(0.5.dp, Color(0xFFF5F5F5), PdfShapes.Pill)
                     .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -290,15 +316,17 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
 
         // The bars.
         Column(Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
-            Box(Modifier.fillMaxWidth().height(with(density) { statusPx.toDp() }).background(Color.Black))
+            Spacer(Modifier.fillMaxWidth().height(with(density) { statusPx.toDp() }))
             AnimatedVisibility(
                 ctl.barsVisible,
                 enter = slideInVertically(tween(PdfMotion.BARS_MS)) { -it } + fadeIn(tween(PdfMotion.BARS_MS)),
                 exit = slideOutVertically(tween(PdfMotion.BARS_MS)) { -it } + fadeOut(tween(PdfMotion.BARS_MS)),
             ) {
+              Box(Modifier.fillMaxWidth().padding(start = FloatSide, end = FloatSide, top = FloatEdge)) {
                 if (ctl.searching) {
                     var query by remember { mutableStateOf(search.query) }
                     SearchBar(
+                        modifier = Modifier.floatingSurface(),
                         query = query,
                         onQuery = {
                             query = it
@@ -316,7 +344,7 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                     )
                 } else {
                     val fa = vm.fieldActions
-                    if (fa != null) FieldTopBar(fa) else ViewerTopBar(
+                    if (fa != null) FieldTopBar(fa, Modifier.floatingSurface()) else ViewerTopBar(
                         toolActive = ctl.tool != ViewerTool.None,
                         doneIsCheck = ctl.tool != ViewerTool.Comment,
                         // while drawing, the strokes not yet added have their own undo and redo
@@ -341,18 +369,19 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                         redoLabel = if (doc.localUndo != null) "Drawing" else doc.info.redo,
                     )
                 }
+              }
             }
         }
         // the Read Aloud player takes the bottom bar's place
         // while typing on the page, the bar (with its formatting) rides above the keyboard
-        if (vm.readAloud == null && vm.fieldActions == null) Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).then(if (vm.editing != null) Modifier.imePadding() else Modifier)) {
+        if (vm.readAloud == null && vm.fieldActions == null) Column(Modifier.fillMaxWidth().align(Alignment.BottomCenter).then(if (vm.editing != null) Modifier.imePadding() else Modifier), horizontalAlignment = Alignment.CenterHorizontally) {
             vm.success?.let { SuccessBannerView(it, onClose = { vm.success = null }) }
             AnimatedVisibility(
                 ctl.barsVisible && !ctl.searching && !vm.readingMode,
                 enter = slideInVertically(tween(PdfMotion.BARS_MS)) { it } + fadeIn(tween(PdfMotion.BARS_MS)),
                 exit = slideOutVertically(tween(PdfMotion.BARS_MS)) { it } + fadeOut(tween(PdfMotion.BARS_MS)),
             ) {
-                Column {
+                Column(Modifier.navigationBarsPadding().padding(start = FloatSide, end = FloatSide, bottom = FloatEdge).floatingSurface(PdfShapes.Bubble).padding(start = BubbleInsetX, end = BubbleInsetX, bottom = BubbleInsetBottom)) {
                     if (ctl.tool == ViewerTool.None) {
                         QuickToolbar(
                             tools = vm.quickToolbar.bar,
@@ -368,12 +397,10 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                             onExtraHeight = { quickExtraPx = it },
                         )
                     } else {
-                        ToolSubToolbar(vm, doc)
+                        Box(Modifier.padding(top = BubbleInsetBottom)) { ToolSubToolbar(vm, doc) }
                     }
                 }
             }
-            // the navigation bar's band stays solid while the bars show (also while searching)
-            if (ctl.barsVisible) Box(Modifier.fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(c.navBand))
         }
 
         // The active tool's sheets, over everything.
@@ -422,6 +449,7 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
         vm.readAloud?.let { ReadAloudBar(vm, doc, it) }
         if (ctl.goToPage) GoToPageDialog(doc, onDismiss = { ctl.goToPage = false })
         if (ctl.pagesOpen) PagesScreen(vm, doc, onClose = { ctl.pagesOpen = false })
+    }
     }
 }
 

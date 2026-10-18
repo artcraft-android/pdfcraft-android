@@ -1,5 +1,6 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import io.github.artcraftandroid.pdfcraft.ui.safeTopPadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -218,8 +219,8 @@ fun PagesScreen(vm: AppViewModel, doc: OpenDocument, onClose: () -> Unit) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Box(
-                            Modifier.size(cardW, 162.dp).clip(RoundedCornerShape(5.dp)).background(c.pageCard)
-                                .border(if (highlighted) 2.dp else 1.dp, if (highlighted) c.toolAccent else c.pageCard, RoundedCornerShape(5.dp)),
+                            Modifier.size(cardW, 162.dp).clip(PdfShapes.Small).background(c.pageCard)
+                                .border(if (highlighted) 2.dp else 1.dp, if (highlighted) c.toolAccent else c.pageCard, PdfShapes.Small),
                             contentAlignment = Alignment.Center,
                         ) {
                             val ratio = (p.width / p.height.coerceAtLeast(1f)).coerceIn(0.2f, 5f)

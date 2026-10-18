@@ -1,5 +1,8 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.ui.floatingSurface
+import io.github.artcraftandroid.pdfcraft.ui.GLASS_PANEL_ALPHA
+import io.github.artcraftandroid.pdfcraft.ui.PdfShapes
 import android.content.Context
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -38,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -73,7 +75,7 @@ enum class QuickTool(val id: String, val label: String, val title: String, val i
     Highlight("highlight", "Highlight", "Highlight", LucideIcons.Highlighter, ToolHues.text, subTools = true),
     Draw("draw", "Draw", "Draw", LucideIcons.PenLine, ToolHues.sign),
     FillSign("fillsign", "Fill & Sign", "Fill & Sign", LucideIcons.Signature, ToolHues.sign, subTools = true),
-    Export("export", "Export PDF", "Export PDF", LucideIcons.FileOutput, ToolHues.export),
+    Export("export", "Export", "Export PDF", LucideIcons.FileOutput, ToolHues.export),
     Combine("combine", "Combine", "Combine files", LucideIcons.Combine, ToolHues.combine),
     Compress("compress", "Compress", "Compress PDF", LucideIcons.FileArchive, ToolHues.compress),
     Protect("protect", "Password", "Set password", LucideIcons.FileLock2, ToolHues.protect),
@@ -247,7 +249,7 @@ fun CustomizeToolbar(vm: AppViewModel, onDone: () -> Unit) {
             )
             Text("Toolbar", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 6.dp))
             BoxWithConstraints(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).background(c.pressed)
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(PdfShapes.Small).background(c.pressed)
                     .onGloballyPositioned { barRect = it.boundsInRoot() },
             ) {
                 val itemW = minOf(72.dp, (maxWidth - 8.dp) / (slots + 1))
@@ -276,7 +278,7 @@ fun CustomizeToolbar(vm: AppViewModel, onDone: () -> Unit) {
             val half = with(LocalDensity.current) { 36.dp.toPx() }
             Box(
                 Modifier.offset { IntOffset((dragPos.x - origin.x - half).roundToInt(), (dragPos.y - origin.y - half).roundToInt()) }
-                    .shadow(6.dp, RoundedCornerShape(8.dp)).background(c.surface, RoundedCornerShape(8.dp)),
+                    .floatingSurface(PdfShapes.Medium, alpha = GLASS_PANEL_ALPHA),
             ) { BarTool(t, 72.dp) }
         }
     }
@@ -291,7 +293,7 @@ private fun BarTool(tool: QuickTool?, width: androidx.compose.ui.unit.Dp) {
         Icon(tool?.icon ?: LucideIcons.LayoutGrid, null, tint = c.icon, modifier = Modifier.size(24.dp))
         Spacer(Modifier.height(6.dp))
         Text(
-            tool?.label ?: "More tools", color = c.text, fontSize = 12.sp, lineHeight = 14.sp, maxLines = 2,
+            tool?.label ?: "More", color = c.text, fontSize = 12.sp, lineHeight = 14.sp, maxLines = 2,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = TextAlign.Center,
         )
     }
@@ -302,7 +304,7 @@ private fun BarTool(tool: QuickTool?, width: androidx.compose.ui.unit.Dp) {
 private fun GridTool(tool: QuickTool) {
     val c = pdfColors
     Column(Modifier.width(80.dp).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)).background(tileBackground(tool.hue, c.dark)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(48.dp).clip(PdfShapes.Small).background(tileBackground(tool.hue, c.dark)), contentAlignment = Alignment.Center) {
             Icon(tool.icon, null, tint = tool.hue, modifier = Modifier.size(26.dp))
         }
         Spacer(Modifier.height(8.dp))

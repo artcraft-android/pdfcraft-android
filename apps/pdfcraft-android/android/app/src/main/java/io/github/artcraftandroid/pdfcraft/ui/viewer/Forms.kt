@@ -168,12 +168,10 @@ class FieldActions(val reset: () -> Unit, val step: (Boolean) -> Unit, val canBa
 
 /** The top bar while a field is filled, as the reference's: Reset at the left, previous and next at the right. */
 @Composable
-fun FieldTopBar(actions: FieldActions) {
+fun FieldTopBar(actions: FieldActions, modifier: Modifier = Modifier) {
     val c = pdfColors
     Row(
-        Modifier.fillMaxWidth().height(TopBarHeight).background(c.surface).drawBehind {
-            drawRect(c.divider, androidx.compose.ui.geometry.Offset(0f, size.height - 1.dp.toPx()), androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()))
-        },
+        modifier.fillMaxWidth().height(TopBarHeight),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Reset", color = c.label, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
