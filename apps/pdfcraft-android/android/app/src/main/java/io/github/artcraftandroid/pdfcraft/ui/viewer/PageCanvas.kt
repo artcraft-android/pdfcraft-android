@@ -32,12 +32,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -53,7 +55,8 @@ data class CanvasLook(
 
 /**
  * The document view: pages laid out by [state], pinch to zoom, drag and fling to scroll, double
- * tap to zoom in or back out (and [onDoubleTap]), tap for [onTap] (bars), long press for [onLongPress]. [overlay]
+ * tap to zoom in or back out, double tap and drag to adjust zoom (and [onDoubleTap]), tap for [onTap]
+ * (bars), long press for [onLongPress]. [overlay]
  * draws over the pages in screen space (selection, search hits, comments being made). When
  * [gesturesEnabled] is false a tool above takes the touches itself.
  */
@@ -74,6 +77,7 @@ fun PageCanvas(
     overlay: DrawScope.() -> Unit = {},
 ) {
     val density = LocalDensity.current
+    val doubleTapSlop = android.view.ViewConfiguration.get(LocalContext.current).scaledDoubleTapSlop
     val scope = rememberCoroutineScope()
     state.gap = with(density) { gap.toPx() }
     state.margin = with(density) { margin.toPx() }
@@ -114,8 +118,14 @@ fun PageCanvas(
             .pointerInput(state, gesturesEnabled) {
                 if (!gesturesEnabled) return@pointerInput
                 val touchSlop = viewConfiguration.touchSlop
+                var lastTapTime = -1L
+                var lastTapPosition = Offset.Zero
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
+                    val doubleTapDrag = lastTapTime >= 0 &&
+                        down.uptimeMillis - lastTapTime <= viewConfiguration.doubleTapTimeoutMillis &&
+                        (down.position - lastTapPosition).getDistance() <= doubleTapSlop
+                    lastTapTime = -1L
                     flinger[0]?.cancel()
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, down.position)
@@ -123,6 +133,7 @@ fun PageCanvas(
                     var zoomed = 1f
                     var started = false
                     var pinched = false
+                    var zoomDrag = false
                     var lastChange: PointerInputChange = down
                     while (true) {
                         val event = awaitPointerEvent()
@@ -136,21 +147,34 @@ fun PageCanvas(
                             if (moved.getDistance() > touchSlop || abs(1f - zoomed) * size.width / 2f > touchSlop) {
                                 started = true
                                 onGestureStart()
+                                if (doubleTapDrag && pressed.size == 1) {
+                                    zoomDrag = true
+                                    onDoubleTap()
+                                }
                             }
                         }
                         if (started) {
-                            if (pressed.size > 1) {
+                            if (zoomDrag && pressed.size == 1) {
+                                state.zoomBy(exp(pan.y * 5f / size.height), down.position)
+                            } else if (pressed.size > 1) {
                                 pinched = true
                                 val c = event.calculateCentroid()
                                 if (zoomChange != 1f) state.zoomBy(zoomChange, c)
                             }
-                            if (pan != Offset.Zero) state.scrollBy(pan.x, pan.y)
+                            if (!zoomDrag && pan != Offset.Zero) state.scrollBy(pan.x, pan.y)
                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                         }
                         lastChange = pressed.first()
                         tracker.addPosition(lastChange.uptimeMillis, lastChange.position)
                     }
-                    if (!started) return@awaitEachGesture
+                    if (!started) {
+                        if (lastChange.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
+                            lastTapTime = down.uptimeMillis
+                            lastTapPosition = down.position
+                        }
+                        return@awaitEachGesture
+                    }
+                    if (zoomDrag) return@awaitEachGesture
                     val v = tracker.calculateVelocity()
                     val velocity = if (pinched) Offset.Zero else Offset(v.x, v.y)
                     flinger[0] = scope.launch { settle(state, velocity, density.density) }
