@@ -1202,6 +1202,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun signFieldWithId(doc: OpenDocument, w: io.github.artcraftandroid.pdfcraft.core.WidgetInfo) {
+        if (!doc.info.readOnlyReason.isNullOrEmpty()) {
+            tell("This document can't be changed, so it can't be signed.")
+            return
+        }
         openCertSign(io.github.artcraftandroid.pdfcraft.ui.viewer.CertTarget(doc, w.field, w.page.toInt(), null))
     }
 
@@ -1724,11 +1728,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             "checkbox" -> fillField(doc, w.field, !w.on)
             "radio" -> w.export?.let { fillField(doc, w.field, it) }
             "text", "combo", "list" -> fieldEdit = io.github.artcraftandroid.pdfcraft.ui.viewer.FieldEdit(doc, w)
-            // a signed field shows its signature's details; an empty one, a drawn or a digital signature
+            // A signed field shows its signature's details; an empty field opens digital-ID
+            // signing. Handwritten Fill & Sign remains available from the Fill & Sign toolbar,
+            // rather than silently turning a certificate tap into a scribble pad.
             "signature" -> if (doc.signatures.any { it.field == w.field && it.signed }) {
                 doc.controller.sheet = io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerSheet.Signatures
             } else {
-                signFieldChoice = doc to w
+                signFieldWithId(doc, w)
             }
             "button" -> pressButton(doc, w)
             else -> return false
