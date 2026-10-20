@@ -18,6 +18,8 @@ use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, SaveOptions, Strea
 
 use crate::SignError;
 use crate::cms::SignedData;
+#[allow(unused_imports)] // the methods are inherent once pdfcraft-cos has them
+use crate::compat::CosCompat as _;
 use crate::der::Time;
 use crate::keys::DigestAlg;
 use crate::pkcs12::DigitalId;
@@ -135,9 +137,8 @@ impl DigestCache {
         #[cfg(test)]
         self.discovery_scans.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut complete = true;
-        // A timestamp has a /ByteRange: only objects whose text says so are parsed.
-        let mut candidates: Vec<_> = doc
-            .scan_objects_mentioning(b"ByteRange")
+        let candidates: Vec<_> = doc
+            .scan_objects_checked()
             .filter_map(|(reference, object)| match object {
                 Ok(object) => is_document_timestamp(&object).then_some(reference),
                 Err(_) => {
@@ -146,8 +147,6 @@ impl DigestCache {
                 }
             })
             .collect();
-        // the scan reads object streams together, not in number order
-        candidates.sort_unstable_by_key(|r| r.num);
         if eligible
             && complete
             && candidates.len() <= DISCOVERY_CACHE_LIMIT
@@ -159,13 +158,15 @@ impl DigestCache {
         candidates
     }
 
-    /// The signed revision `bytes[..end]`, parsed (and kept).
-    fn revision(&self, bytes: &[u8], end: usize) -> Option<Document> {
+    /// The signed revision `bytes[..end]`, parsed (and kept). An encrypted one is opened with
+    /// `doc`'s own key (the same `/Encrypt` and `/ID`), so a user password the document was
+    /// opened with is neither needed again nor kept here (#1808).
+    fn revision(&self, doc: &Document, bytes: &[u8], end: usize) -> Option<Document> {
         let key = (end, fingerprint(&bytes[..end]));
         if let Some(d) = self.revisions.lock().ok().and_then(|m| m.get(&key).cloned()) {
             return Some(d);
         }
-        let d = Document::open(Arc::new(bytes[..end].to_vec())).ok()?;
+        let d = doc.open_with_same_credentials(Arc::new(bytes[..end].to_vec())).ok()?;
         if let Ok(mut m) = self.revisions.lock() {
             if m.len() > 8 {
                 m.clear();
@@ -469,7 +470,7 @@ impl SignatureInfo {
     }
 }
 
-fn text(doc: &Document, d: &Dict, key: &[u8]) -> Option<String> {
+pub(crate) fn text(doc: &Document, d: &Dict, key: &[u8]) -> Option<String> {
     let o = doc.resolve(d.get(key)?);
     let s = match &*o {
         Object::String(s) => s.to_text(),
@@ -486,6 +487,20 @@ struct Field {
     r: Option<ObjRef>,
     dict: Dict,
     widgets: Vec<(Option<ObjRef>, Dict)>,
+}
+
+impl Field {
+    /// The signature dictionary in /V. A field without one is unsigned, whether /V is missing,
+    /// null or not a dictionary.
+    fn signature(&self, doc: &Document) -> Option<Dict> {
+        self.dict.get(b"V").map(|v| doc.resolve(v)).and_then(|v| v.as_dict().cloned())
+    }
+
+    /// True when /V holds something that is neither null nor a signature dictionary: signing the
+    /// field would overwrite a value we can't read as a signature.
+    fn has_foreign_value(&self, doc: &Document) -> bool {
+        self.dict.get(b"V").map(|v| doc.resolve(v)).is_some_and(|v| !matches!(*v, Object::Null) && v.as_dict().is_none())
+    }
 }
 
 /// Every signature field, depth first in `/Fields` order.
@@ -569,7 +584,7 @@ pub fn list_cached(doc: &Document, bytes: &[u8], trust: &TrustStore, cache: &Dig
             .filter(|r| r.len() == 4)
             .map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
         let visible = rect.is_some_and(|r| r[2] - r[0] > 0.5 && r[3] - r[1] > 0.5);
-        let v = f.dict.get(b"V").map(|v| doc.resolve(v)).and_then(|v| v.as_dict().cloned());
+        let v = f.signature(doc);
         let mut info = SignatureInfo {
             field: f.name.clone(),
             signed: v.is_some(),
@@ -715,7 +730,7 @@ fn validate_into(doc: &Document, bytes: &[u8], trust: &TrustStore, v: &Dict, inf
     let covered = o1 + l1;
     info.signed_len = covered;
     // The signed revision's number: its cross-reference sections (1 for a reconstructed file).
-    info.revision = cache.revision(bytes, covered).map_or(1, |d| d.revisions().len().max(1));
+    info.revision = cache.revision(doc, bytes, covered).map_or(1, |d| d.revisions().len().max(1));
     // What can't be checked is unknown, not invalid: only data that is wrong or fails its check
     // is "invalid".
     let unsupported = |info: &mut SignatureInfo, why: &str| {
@@ -842,7 +857,7 @@ fn finish_validation(
     info.modification = if covered == bytes.len() || bytes[covered..].iter().all(|b| b.is_ascii_whitespace() || *b == 0) {
         Modification::None
     } else {
-        classify_changes(doc, cache.revision(bytes, covered), info.certify)
+        classify_changes(doc, cache.revision(doc, bytes, covered), info.certify)
     };
     let mut problems = false;
     // The changes are handed over as the words they are, not stitched into the sentence, so an
@@ -1004,7 +1019,7 @@ fn validate_doc_timestamp(doc: &Document, bytes: &[u8], v: &Dict, info: &mut Sig
     };
     let covered = o1 + l1;
     info.signed_len = covered;
-    info.revision = cache.revision(bytes, covered).map_or(1, |d| d.revisions().len().max(1));
+    info.revision = cache.revision(doc, bytes, covered).map_or(1, |d| d.revisions().len().max(1));
     let token = match crate::timestamp::parse_token(&contents) {
         Ok(t) => t,
         Err(e) => return invalid(info, Detail::of("The timestamp token could not be read ({}).", Fill::Reason(e.to_string()))),
@@ -1027,7 +1042,7 @@ fn validate_doc_timestamp(doc: &Document, bytes: &[u8], v: &Dict, info: &mut Sig
     info.modification = if covered == bytes.len() || bytes[covered..].iter().all(|b| b.is_ascii_whitespace() || *b == 0) {
         Modification::None
     } else {
-        classify_changes(doc, cache.revision(bytes, covered), None)
+        classify_changes(doc, cache.revision(doc, bytes, covered), None)
     };
     match &info.modification {
         Modification::None => info.details.push(Detail::plain("This document has not been modified since this timestamp was applied.")),
@@ -1192,6 +1207,8 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
     // attacker-written version carries (relabelling a signed page /Type /Sig, or dropping its
     // /Type and adding /ModDate, must not reclassify it away from page content).
     let signed_pages: HashSet<ObjRef> = pdfcraft_annot::page_refs(&old).unwrap_or_default().into_iter().collect();
+    // What each signed page draws from, by the role it held when signed (#1787).
+    let signed_resources = signed_page_resources(&old, &signed_pages);
     let old_info = old.trailer().get(b"Info").and_then(Object::as_ref);
     let (mut allowed, mut disallowed): (Vec<&'static str>, Vec<&'static str>) = (Vec::new(), Vec::new());
     let dss = dss_parts(doc, &old);
@@ -1209,6 +1226,18 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
             _ => false,
         }
     };
+    // A later cross-reference section may carry an entry this reader sets aside (an in-use entry
+    // at offset 0, a second entry for one object, a reserved entry type). The renderer may follow
+    // it and draw another object than the one compared below, so the page could show new content
+    // while every comparison here finds the signed object untouched. No writer has a reason to
+    // add such an entry after signing: it is never a permitted change.
+    for (_, num) in doc.xref_oddities().iter().filter(|o| !old.xref_oddities().contains(o)) {
+        let r = ObjRef { num: *num, generation: doc.generation(*num) };
+        let what = if old_content.contains(&r) || signed_pages.contains(&r) { kind::PAGE_CONTENT } else { kind::OTHER };
+        if !disallowed.contains(&what) {
+            disallowed.push(what);
+        }
+    }
     for num in doc.object_numbers() {
         if same_place(num) {
             continue;
@@ -1217,12 +1246,31 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
         let new = doc.get(r);
         let before = old.try_get(num).ok().filter(|o| !matches!(**o, Object::Null));
         if before.as_deref() == Some(&*new) {
+            // The same content at a new place. That is true for the renderer as well only when
+            // the entry locates the object itself: where this reader had to search for the
+            // object, another reader may arrive at a different one.
+            if !doc.is_edited(num) && !doc.xref_entry_is_exact(num) && !disallowed.contains(&kind::OTHER) {
+                disallowed.push(kind::OTHER);
+            }
             continue;
         }
-        let what = match &*new {
+        // A resource of a signed page is page content whatever keys its new version carries
+        // (#1787): a /FT or /Subtype /Widget written by whoever rewrote a font, an XObject or a
+        // graphics state does not make that a form fill. A container (the resources dictionary,
+        // a category dictionary) that kept every entry it had and only gained names changes
+        // nothing the signed content draws, and is judged as before.
+        let kept_entries = |d: &Dict| before.as_deref().and_then(Object::as_dict).is_some_and(|b| b.iter().all(|(k, v)| d.get(k) == Some(v)));
+        let resource_kind = match (signed_resources.get(&r), &*new) {
+            (Some(false), _) => Some(kind::PAGE_CONTENT),
+            (Some(true), Object::Dict(d)) if kept_entries(d) => None,
+            (Some(true), _) => Some(kind::PAGE_CONTENT),
+            (None, _) => None,
+        };
+        let what = match (resource_kind, &*new) {
+            (Some(k), _) => k,
             // The Document Security Store's own arrays and dictionaries, when they only grew.
-            _ if dss.contains(&num) => kind::SECURITY_STORE,
-            Object::Dict(d) => {
+            (_, _) if dss.contains(&num) => kind::SECURITY_STORE,
+            (_, Object::Dict(d)) => {
                 let was = before.as_deref().and_then(Object::as_dict);
                 if signed_pages.contains(&r) {
                     // A signed page is always judged by what the page shows, whatever it is now
@@ -1235,7 +1283,7 @@ fn classify_changes(doc: &Document, old: Option<Document>, p: Option<u8>) -> Mod
                     change_kind(doc, &old, d, was)
                 }
             }
-            Object::Stream(s) => {
+            (_, Object::Stream(s)) => {
                 // File plumbing is what the stream was when signed: the /Type it has now is
                 // written by whoever changed it, and the renderer ignores /Type (a page's Form
                 // XObject relabelled /ObjStm still draws its new content).
@@ -1456,6 +1504,88 @@ fn is_signature_dict(d: &Dict) -> bool {
     matches!(d.name(b"Type"), Some(b"Sig" | b"DocTimeStamp" | b"SigRef" | b"TransformParams")) || d.name(b"FT") == Some(b"Sig")
 }
 
+/// The objects the signed pages draw from, by reference, with the role each held when signed
+/// (#1787): `true` for a container (a page's resources dictionary, or one of its category
+/// dictionaries), where a name added later can't be reached by unchanged content; `false` for
+/// everything reached from a container's entries (fonts and their files, XObjects and their own
+/// resources, graphics states and soft masks, colour spaces, patterns, shadings, optional-content
+/// properties), where any change changes what the page shows. Resources are the page's own or
+/// inherited. Bounded by depth and by the number of objects visited; past the bound the rest is
+/// judged as before.
+fn signed_page_resources(old: &Document, pages: &HashSet<ObjRef>) -> HashMap<ObjRef, bool> {
+    const CATEGORIES: [&[u8]; 7] = [b"Font", b"XObject", b"ExtGState", b"ColorSpace", b"Pattern", b"Shading", b"Properties"];
+    const MAX_VISITED: usize = 50_000;
+    const MAX_DEPTH: u8 = 32;
+    const MAX_INHERITANCE: usize = 64;
+
+    /// Everything reachable from `o` is content the page draws (a leaf role, overriding a
+    /// container one reached by another path). A signed page or the catalog reached this way
+    /// (a `/P` or `/Parent` back-reference) keeps the role of its own: the walk stops there.
+    fn reach(old: &Document, o: &Object, depth: u8, stop: &HashSet<ObjRef>, roles: &mut HashMap<ObjRef, bool>) {
+        if roles.len() >= MAX_VISITED || depth > MAX_DEPTH {
+            return;
+        }
+        let resolved;
+        let o = match o {
+            Object::Ref(r) => {
+                if stop.contains(r) || roles.insert(*r, false).is_some() {
+                    return;
+                }
+                resolved = old.get(*r);
+                &*resolved
+            }
+            other => other,
+        };
+        match o {
+            Object::Dict(d) => d.iter().for_each(|(_, v)| reach(old, v, depth + 1, stop, roles)),
+            Object::Stream(s) => s.dict.iter().for_each(|(_, v)| reach(old, v, depth + 1, stop, roles)),
+            Object::Array(a) => a.iter().for_each(|v| reach(old, v, depth + 1, stop, roles)),
+            _ => {}
+        }
+    }
+
+    /// A page's `/Resources`, its own or the nearest ancestor's.
+    fn resources(old: &Document, page: ObjRef) -> Option<Object> {
+        let mut seen = HashSet::new();
+        let mut cur = page;
+        while seen.insert(cur) && seen.len() <= MAX_INHERITANCE {
+            let d = old.get(cur);
+            let d = d.as_dict()?;
+            if let Some(r) = d.get(b"Resources") {
+                return Some(r.clone());
+            }
+            cur = d.get(b"Parent").and_then(Object::as_ref)?;
+        }
+        None
+    }
+
+    let mut roles = HashMap::new();
+    let mut stop = pages.clone();
+    stop.extend(old.root());
+    for page in pages {
+        let Some(res) = resources(old, *page) else { continue };
+        let container = |o: &Object, roles: &mut HashMap<ObjRef, bool>| -> Arc<Object> {
+            match o {
+                Object::Ref(r) => {
+                    roles.entry(*r).or_insert(true);
+                    old.get(*r)
+                }
+                other => Arc::new(other.clone()),
+            }
+        };
+        let res = container(&res, &mut roles);
+        let Some(d) = res.as_dict() else { continue };
+        for category in CATEGORIES {
+            let Some(v) = d.get(category) else { continue };
+            let category = container(v, &mut roles);
+            if let Some(entries) = category.as_dict() {
+                entries.iter().for_each(|(_, entry)| reach(old, entry, 0, &stop, &mut roles));
+            }
+        }
+    }
+    roles
+}
+
 /// A changed object that was a page in the signed revision, judged by what the page shows rather
 /// than by any `/Type` its new version carries. Only added annotations are permitted; any other
 /// difference (content, resources, a relabelled or dropped `/Type`) is a page content change.
@@ -1573,6 +1703,27 @@ impl Default for AppearanceLabels {
             location: "Location: ".into(),
             date: "Date: ".into(),
         }
+    }
+}
+
+impl AppearanceLabels {
+    /// Each label with its field name (`signed_by`, `distinguished_name`, `reason`, `location`,
+    /// `date`), in the order the visible signature shows them.
+    pub fn fields(&self) -> [(&'static str, &str); 5] {
+        [
+            ("signed_by", self.signed_by.as_str()),
+            ("distinguished_name", self.distinguished_name.as_str()),
+            ("reason", self.reason.as_str()),
+            ("location", self.location.as_str()),
+            ("date", self.date.as_str()),
+        ]
+    }
+
+    /// The first label, with its field name, that has a character the visible signature's font
+    /// can't draw, and that character. Signing refuses such a label when it is shown, so an
+    /// interface checks its translated labels here and falls back to [`Default`] if one fails.
+    pub fn first_undrawable(&self) -> Option<(&'static str, char)> {
+        self.fields().into_iter().find_map(|(field, text)| pdfcraft_fonts::first_undrawable(text).map(|c| (field, c)))
     }
 }
 
@@ -1714,8 +1865,11 @@ fn sign_inner(
     let (widget, rect) = match existing {
         Some(f) => {
             let f = f?;
-            if f.dict.contains(b"V") {
+            if f.signature(&doc).is_some() {
                 return Err(SignError::Pdf(format!("the field {:?} is already signed", f.name)));
+            }
+            if f.has_foreign_value(&doc) {
+                return Err(SignError::Pdf(format!("the value of the field {:?} is not a signature", f.name)));
             }
             let fr = f.r.ok_or_else(|| SignError::Pdf("the field is not an indirect object".into()))?;
             doc.update_dict(fr, |d| d.set(b"V".to_vec(), Object::Ref(sig)))?;
@@ -1916,6 +2070,7 @@ pub fn display_date(pdf: &str) -> String {
 /// Helvetica (the signer's name, the certificate's subject, the reason or the location) has a
 /// character Helvetica can't draw: signing invisibly, or leaving that part out, still works. A
 /// graphic doesn't change this: the name it replaces on the left is still among the details.
+/// A label that is drawn ([`AppearanceLabels`], the caller's words) is refused the same way.
 fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate, opts: &SignOptions) -> Result<Stream, SignError> {
     use pdfcraft_fonts::{first_undrawable, helvetica_width, literal, undrawable_message, win_ansi, wrap};
     let (w, h) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
@@ -1935,6 +2090,17 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
                     undrawable_message(&format!("{what} of the visible signature"), c)
                 )));
             }
+        }
+        // The labels are the caller's words (a translation), checked as the details are: only
+        // those that are drawn, as each is drawn only beside its detail.
+        let has = |v: Option<&str>| v.is_some_and(|v| !v.is_empty());
+        let drawn = [a.name, a.distinguished_name, a.reason && has(opts.reason.as_deref()), a.location && has(opts.location.as_deref()), a.date];
+        let mut labels = opts.appearance_labels.fields().into_iter().zip(drawn).filter(|&(_, on)| a.labels && on);
+        if let Some((field, c)) = labels.find_map(|((field, text), _)| first_undrawable(text).map(|c| (field, c))) {
+            return Err(SignError::Unsupported(format!(
+                "{}; pass that label in Western European characters, or leave the labels out of the visible signature",
+                undrawable_message(&format!("the {field} label of the visible signature"), c)
+            )));
         }
     }
     let mut lines: Vec<String> = Vec::new();
@@ -2037,4 +2203,761 @@ fn appearance(doc: &mut Document, rect: [f64; 4], name: &str, cert: &Certificate
 pub(crate) fn fmt(v: f64) -> String {
     let s = format!("{v:.2}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+// ── validated layered signature appearances (display only) ──────────────────────────────────
+
+/// A copy of `doc` in which every validated (`Status::Valid`), visible signature widget that
+/// carries a layered unverified appearance (a frame Form XObject invoking a standalone unverified
+/// caption layer, a separate signer-details text layer, and a vector question-mark/status glyph
+/// layer) has its caption updated to `"Signature valid"` and its glyph replaced by a green
+/// checkmark drawn behind the text layers. Returns `None` when no widget qualifies.
+pub fn with_validated_appearances(doc: &Document, signatures: &[SignatureInfo]) -> Option<Document> {
+    if !signatures.iter().any(|s| s.signed && s.visible && s.status == Status::Valid) {
+        return None;
+    }
+    let mut copy: Option<Document> = None;
+    for f in sig_fields(doc) {
+        if !signatures.iter().any(|s| s.signed && s.visible && s.status == Status::Valid && s.field == f.name) {
+            continue;
+        }
+        for (widget_ref, wd) in &f.widgets {
+            let Some(widget_ref) = *widget_ref else { continue };
+            let Some(patch) = plan_validated_widget(doc, widget_ref, wd) else { continue };
+            apply_validated_widget(copy.get_or_insert_with(|| doc.clone()), patch);
+        }
+    }
+    copy
+}
+
+struct ValidatedWidgetPatch {
+    widget_ref: ObjRef,
+    widget_dict: Dict,
+    ap_ref: Option<ObjRef>,
+    ap_dict: Dict,
+    frame_dict: Dict,
+    frame_xobjects: Dict,
+    frame_ops: Vec<u8>,
+    glyph_ref: ObjRef,
+    glyph_dict: Dict,
+    glyph_ops: Vec<u8>,
+    caption_ref: ObjRef,
+    caption_dict: Dict,
+    caption_ops: Vec<u8>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LayerRole {
+    Caption,
+    Words,
+    Glyph,
+    Other,
+}
+
+#[derive(Clone)]
+struct DoCall {
+    name: Vec<u8>,
+    matrix: Option<[f64; 6]>,
+}
+
+struct FormScan {
+    do_calls: Vec<DoCall>,
+    has_text_ops: bool,
+    text_lines: Vec<String>,
+    path_points: Vec<(f64, f64)>,
+    has_curves: bool,
+    has_re: bool,
+    has_inline_image: bool,
+    has_other_ops: bool,
+    has_unwrapped_do: bool,
+}
+
+/// Plans a widget-local appearance rewrite for a supported layered valid signature.
+fn plan_validated_widget(doc: &Document, widget_ref: ObjRef, wd: &Dict) -> Option<ValidatedWidgetPatch> {
+    let ap = doc.resolve(wd.get(b"AP")?).as_dict().cloned()?;
+    let ap_ref = wd.get(b"AP").and_then(Object::as_ref);
+    let ap_n = ap.reference(b"N")?;
+    let (_frame_ref, frame_stream, frame_bbox, xobjects, frame_scan) = find_frame_form(doc, ap_n)?;
+    let mut roles: Vec<(DoCall, ObjRef, LayerRole)> = Vec::with_capacity(frame_scan.do_calls.len());
+    for call in &frame_scan.do_calls {
+        let layer_ref = xobjects.reference(&call.name)?;
+        let Object::Stream(layer_stream) = &*doc.get(layer_ref) else { return None };
+        if layer_stream.dict.name(b"Subtype") != Some(b"Form") {
+            return None;
+        }
+        let layer_bytes = layer_stream.decoded().ok()?;
+        let lscan = scan_form_stream(&layer_bytes);
+        if lscan.has_inline_image {
+            return None;
+        }
+        // A layer that invokes an Image XObject is raster artwork, never a vector status glyph.
+        if !lscan.do_calls.is_empty() {
+            roles.push((call.clone(), layer_ref, LayerRole::Other));
+            continue;
+        }
+        let role = if is_unverified_caption(&lscan.text_lines) {
+            LayerRole::Caption
+        } else if is_question_mark_text(&lscan.text_lines) {
+            LayerRole::Glyph
+        } else if lscan.has_text_ops {
+            LayerRole::Words
+        } else if !lscan.path_points.is_empty() {
+            let lbbox = form_bbox(doc, &layer_stream.dict)?;
+            if lscan.has_curves || !is_perimeter_border(&lscan.path_points, lbbox) { LayerRole::Glyph } else { LayerRole::Other }
+        } else {
+            LayerRole::Other
+        };
+        roles.push((call.clone(), layer_ref, role));
+    }
+    let mut caption_refs: Vec<ObjRef> = roles.iter().filter(|(_, _, r)| *r == LayerRole::Caption).map(|(_, o, _)| *o).collect();
+    caption_refs.sort_unstable_by_key(|r| (r.num, r.generation));
+    caption_refs.dedup();
+    let [caption_ref] = caption_refs.as_slice() else { return None };
+
+    let has_words = roles.iter().any(|(_, _, r)| *r == LayerRole::Words);
+    if !has_words {
+        return None;
+    }
+
+    let mut glyph_refs: Vec<ObjRef> = roles.iter().filter(|(_, _, r)| *r == LayerRole::Glyph).map(|(_, o, _)| *o).collect();
+    glyph_refs.sort_unstable_by_key(|r| (r.num, r.generation));
+    glyph_refs.dedup();
+    let [glyph_ref] = glyph_refs.as_slice() else { return None };
+
+    if caption_ref == glyph_ref
+        || roles.iter().any(|(_, o, r)| (*o == *caption_ref && *r != LayerRole::Caption) || (*o == *glyph_ref && *r != LayerRole::Glyph))
+    {
+        return None;
+    }
+
+    let Object::Stream(glyph_stream) = &*doc.get(*glyph_ref) else { return None };
+    let mut glyph_dict = glyph_stream.dict.clone();
+    glyph_dict.remove(b"Filter");
+    glyph_dict.remove(b"DecodeParms");
+    glyph_dict.remove(b"Matrix");
+    glyph_dict.set(b"BBox".to_vec(), Object::Array(frame_bbox.iter().map(|v| Object::Real(*v)).collect()));
+    let glyph_ops = valid_glyph_ops(frame_bbox);
+
+    let Object::Stream(cap_stream) = &*doc.get(*caption_ref) else { return None };
+    let cap_bbox = form_bbox(doc, &cap_stream.dict)?;
+    let mut caption_dict = cap_stream.dict.clone();
+    caption_dict.remove(b"Filter");
+    caption_dict.remove(b"DecodeParms");
+    let mut cap_res = caption_dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    let mut cap_fonts = cap_res.get(b"Font").map(|f| doc.resolve(f)).and_then(|f| f.as_dict().cloned()).unwrap_or_default();
+    let mut helv = Dict::new();
+    helv.set(b"Type".to_vec(), Object::name("Font"));
+    helv.set(b"Subtype".to_vec(), Object::name("Type1"));
+    helv.set(b"BaseFont".to_vec(), Object::name("Helvetica"));
+    helv.set(b"Encoding".to_vec(), Object::name("WinAnsiEncoding"));
+    cap_fonts.set(b"F1".to_vec(), Object::Dict(helv));
+    cap_res.set(b"Font".to_vec(), Object::Dict(cap_fonts));
+    caption_dict.set(b"Resources".to_vec(), Object::Dict(cap_res));
+    let caption_ops = valid_caption_ops(cap_bbox, frame_bbox);
+
+    // Draw the glyph layer before the text layers (Words and Caption) so the green tick sits
+    // behind the signer text and caption instead of obscuring them.
+    let mut ordered = roles;
+    if let (Some(first_text), Some(glyph_pos)) = (
+        ordered.iter().position(|(_, _, r)| matches!(r, LayerRole::Words | LayerRole::Caption)),
+        ordered.iter().position(|(_, _, r)| *r == LayerRole::Glyph),
+    ) && glyph_pos > first_text
+    {
+        let item = ordered.remove(glyph_pos);
+        ordered.insert(first_text, item);
+    }
+    let mut frame_ops = String::new();
+    for (call, _, role) in &ordered {
+        let name = String::from_utf8_lossy(&call.name);
+        match (role, call.matrix) {
+            (LayerRole::Glyph, _) | (_, None) => {
+                frame_ops.push_str(&format!("q /{name} Do Q\n"));
+            }
+            (_, Some([a, b, c, d, e, f])) => {
+                frame_ops.push_str(&format!("q {} {} {} {} {} {} cm /{name} Do Q\n", fmt(a), fmt(b), fmt(c), fmt(d), fmt(e), fmt(f)));
+            }
+        }
+    }
+    let mut frame_dict = frame_stream.dict.clone();
+    frame_dict.remove(b"Filter");
+    frame_dict.remove(b"DecodeParms");
+
+    Some(ValidatedWidgetPatch {
+        widget_ref,
+        widget_dict: wd.clone(),
+        ap_ref,
+        ap_dict: ap,
+        frame_dict,
+        frame_xobjects: xobjects,
+        frame_ops: frame_ops.into_bytes(),
+        glyph_ref: *glyph_ref,
+        glyph_dict,
+        glyph_ops,
+        caption_ref: *caption_ref,
+        caption_dict,
+        caption_ops,
+    })
+}
+
+/// Applies a validated appearance patch using cloned widget-local PDF objects.
+fn apply_validated_widget(doc: &mut Document, patch: ValidatedWidgetPatch) {
+    let glyph_ref = doc.add(Object::Stream(Stream::from_raw(patch.glyph_dict, patch.glyph_ops)));
+    let caption_ref = doc.add(Object::Stream(Stream::from_raw(patch.caption_dict, patch.caption_ops)));
+    let frame_xobjects = patch
+        .frame_xobjects
+        .iter()
+        .map(|(name, object)| {
+            let object = match object.as_ref() {
+                Some(reference) if reference == patch.glyph_ref => Object::Ref(glyph_ref),
+                Some(reference) if reference == patch.caption_ref => Object::Ref(caption_ref),
+                _ => object.clone(),
+            };
+            (name.clone(), object)
+        })
+        .collect::<Dict>();
+    let mut frame_dict = patch.frame_dict;
+    let mut resources = frame_dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned()).unwrap_or_default();
+    resources.set(b"XObject".to_vec(), Object::Dict(frame_xobjects));
+    let resources_ref = doc.add(Object::Dict(resources));
+    frame_dict.set(b"Resources".to_vec(), Object::Ref(resources_ref));
+    let frame_ref = doc.add(Object::Stream(Stream::from_raw(frame_dict, patch.frame_ops)));
+    let mut ap_dict = patch.ap_dict;
+    ap_dict.set(b"N".to_vec(), Object::Ref(frame_ref));
+    let mut widget_dict = patch.widget_dict;
+    if patch.ap_ref.is_some() {
+        let ap_ref = doc.add(Object::Dict(ap_dict));
+        widget_dict.set(b"AP".to_vec(), Object::Ref(ap_ref));
+    } else {
+        widget_dict.set(b"AP".to_vec(), Object::Dict(ap_dict));
+    }
+    doc.set(patch.widget_ref, Object::Dict(widget_dict));
+}
+
+/// Finds the safe layered frame form beneath an appearance wrapper.
+fn find_frame_form(doc: &Document, start: ObjRef) -> Option<(ObjRef, Stream, [f64; 4], Dict, FormScan)> {
+    let mut curr = start;
+    let mut seen = HashSet::new();
+    for _ in 0..4 {
+        if !seen.insert(curr) {
+            return None;
+        }
+        let Object::Stream(s) = &*doc.get(curr) else { return None };
+        if s.dict.name(b"Subtype") != Some(b"Form") {
+            return None;
+        }
+        let bytes = s.decoded().ok()?;
+        let scan = scan_form_stream(&bytes);
+        if scan.has_inline_image {
+            return None;
+        }
+        let res = s.dict.get(b"Resources").map(|r| doc.resolve(r)).and_then(|r| r.as_dict().cloned())?;
+        let xobjects = res.get(b"XObject").map(|x| doc.resolve(x)).and_then(|x| x.as_dict().cloned())?;
+        if scan.do_calls.len() == 1 && !scan.has_other_ops && !scan.has_unwrapped_do {
+            let call = scan.do_calls.first()?;
+            let wrapper_transformed =
+                nums(doc, &s.dict, b"Matrix").and_then(|m| <[f64; 6]>::try_from(m.as_slice()).ok()).is_some_and(|m| !is_identity_matrix(m));
+            if wrapper_transformed || call.matrix.is_some() {
+                return None;
+            }
+            curr = xobjects.reference(&call.name)?;
+            continue;
+        }
+        if scan.do_calls.len() >= 2 && !scan.has_other_ops && !scan.has_unwrapped_do {
+            let bbox = form_bbox(doc, &s.dict)?;
+            return Some((curr, s.clone(), bbox, xobjects, scan));
+        }
+        return None;
+    }
+    None
+}
+
+/// Reads and normalizes a finite, non-empty Form XObject bounding box.
+fn form_bbox(doc: &Document, d: &Dict) -> Option<[f64; 4]> {
+    let b = nums(doc, d, b"BBox")?;
+    let [x0, y0, x1, y1] = <[f64; 4]>::try_from(b.as_slice()).ok()?;
+    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let (min_x, max_x) = (x0.min(x1), x0.max(x1));
+    let (min_y, max_y) = (y0.min(y1), y0.max(y1));
+    (max_x - min_x > 0.5 && max_y - min_y > 0.5).then_some([min_x, min_y, max_x, max_y])
+}
+
+/// Reports whether extracted layer text is a known unverified-signature caption.
+fn is_unverified_caption(lines: &[String]) -> bool {
+    if lines.is_empty() {
+        return false;
+    }
+    let joined: String = lines.iter().flat_map(|l| l.split_whitespace()).collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+    matches!(joined.as_str(), "signature not verified" | "validity unknown" | "signature validity is unknown")
+}
+
+/// Reports whether extracted layer text is the standalone question-mark glyph.
+fn is_question_mark_text(lines: &[String]) -> bool {
+    let joined: String = lines.iter().flat_map(|l| l.split_whitespace()).collect::<Vec<_>>().join(" ");
+    joined == "?"
+}
+
+/// Reports whether path points form a border around most of a layer’s bounding box.
+fn is_perimeter_border(points: &[(f64, f64)], bbox: [f64; 4]) -> bool {
+    if points.len() < 4 {
+        return false;
+    }
+    let [bx0, by0, bx1, by1] = bbox;
+    let (bw, bh) = (bx1 - bx0, by1 - by0);
+    if bw <= 0.0 || bh <= 0.0 {
+        return false;
+    }
+    let min_x = points.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let max_x = points.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    let min_y = points.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let max_y = points.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+    if max_x - min_x < 0.85 * bw || max_y - min_y < 0.85 * bh {
+        return false;
+    }
+    let margin = 0.12 * bw.min(bh);
+    points.iter().all(|&(x, y)| {
+        let dx = (x - bx0).abs().min((bx1 - x).abs());
+        let dy = (y - by0).abs().min((by1 - y).abs());
+        dx.min(dy) <= margin
+    })
+}
+
+/// Builds PDF operators for the green checkmark used in a validated display copy.
+fn valid_glyph_ops(bbox: [f64; 4]) -> Vec<u8> {
+    let [bx0, by0, bx1, by1] = bbox;
+    let (bw, bh) = (bx1 - bx0, by1 - by0);
+    let s = bw.min(bh);
+    let ox = bx0 + (bw - s) * 0.5;
+    let oy = by0 + (bh - s) * 0.5;
+    let d = s * 0.03;
+    let lw = (s * 0.012).max(0.5);
+    const PTS: [(f64, f64); 6] = [(0.15, 0.42), (0.23, 0.53), (0.40, 0.34), (0.74, 0.86), (0.85, 0.78), (0.42, 0.16)];
+    let mut out = String::from("q\n0 g\n");
+    for (i, &(px, py)) in PTS.iter().enumerate() {
+        let x = ox + px * s + d;
+        let y = oy + py * s - d;
+        out.push_str(&format!("{} {} {}\n", fmt(x), fmt(y), if i == 0 { "m" } else { "l" }));
+    }
+    out.push_str(&format!("h f\n0 G\n0 0.68 0.15 rg\n{} w\n0 j\n", fmt(lw)));
+    for (i, &(px, py)) in PTS.iter().enumerate() {
+        let x = ox + px * s;
+        let y = oy + py * s;
+        out.push_str(&format!("{} {} {}\n", fmt(x), fmt(y), if i == 0 { "m" } else { "l" }));
+    }
+    out.push_str("h B\nQ\n");
+    out.into_bytes()
+}
+
+/// Builds PDF text operators for the validated signature caption.
+fn valid_caption_ops(cap_bbox: [f64; 4], frame_bbox: [f64; 4]) -> Vec<u8> {
+    let [bx0, by0, bx1, by1] = cap_bbox;
+    let (bw, bh) = ((bx1 - bx0).max(1.0), (by1 - by0).max(1.0));
+    let frame_bh = (frame_bbox[3] - frame_bbox[1]).abs();
+    // When a caption layer shares the full widget BBox instead of a dedicated top strip,
+    // place the caption in the top 30% strip where standard layered captions sit.
+    let (strip_y, strip_h) = if frame_bh > 0.0 && (bh - frame_bh).abs() < 1.0 && bh > bw * 0.45 { (by0 + bh * 0.70, bh * 0.30) } else { (by0, bh) };
+    let label = "Signature valid";
+    let pad = (bw * 0.015).clamp(0.5, 4.0);
+    let unit_w = pdfcraft_fonts::helvetica_width(label, 1.0).max(1.0);
+    let size = ((bw - 2.0 * pad).max(1.0) / unit_w).min(strip_h * 0.85).max(1.0);
+    let x = bx0 + pad;
+    let y = strip_y + ((strip_h - size * 0.72).max(0.0)) * 0.5;
+    format!("BT\n0 g\n/F1 {} Tf\n{} {} Td\n({label}) Tj\nET\n", fmt(size), fmt(x), fmt(y)).into_bytes()
+}
+
+#[derive(Clone)]
+enum StreamToken {
+    Name(Vec<u8>),
+    Number(f64),
+    Str(Vec<u8>),
+    Array(Vec<StreamToken>),
+    Op(Vec<u8>),
+}
+
+fn is_pdf_ws(b: u8) -> bool {
+    matches!(b, 0x00 | 0x09 | 0x0A | 0x0C | 0x0D | 0x20)
+}
+
+fn is_pdf_delim(b: u8) -> bool {
+    matches!(b, b'/' | b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'%')
+}
+
+/// Parses the next token from a PDF content stream, including nested arrays.
+fn next_stream_token(bytes: &[u8], pos: &mut usize, depth: usize) -> Option<StreamToken> {
+    if depth > 6 {
+        return None;
+    }
+    while let Some(&b) = bytes.get(*pos) {
+        if is_pdf_ws(b) {
+            *pos += 1;
+        } else if b == b'%' {
+            *pos += 1;
+            while let Some(&c) = bytes.get(*pos) {
+                *pos += 1;
+                if c == b'\n' || c == b'\r' {
+                    break;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    let &first = bytes.get(*pos)?;
+    match first {
+        b'/' => {
+            *pos += 1;
+            let mut name = Vec::new();
+            while let Some(&b) = bytes.get(*pos) {
+                if is_pdf_ws(b) || is_pdf_delim(b) {
+                    break;
+                }
+                if b == b'#'
+                    && let (Some(&h1), Some(&h2)) = (bytes.get(*pos + 1), bytes.get(*pos + 2))
+                    && let (Some(d1), Some(d2)) = ((h1 as char).to_digit(16), (h2 as char).to_digit(16))
+                {
+                    name.push(((d1 << 4) | d2) as u8);
+                    *pos += 3;
+                    continue;
+                }
+                name.push(b);
+                *pos += 1;
+            }
+            Some(StreamToken::Name(name))
+        }
+        b'(' => {
+            *pos += 1;
+            let mut out = Vec::new();
+            let mut paren = 1usize;
+            while let Some(&b) = bytes.get(*pos) {
+                *pos += 1;
+                match b {
+                    b'(' => {
+                        paren += 1;
+                        out.push(b'(');
+                    }
+                    b')' => {
+                        paren -= 1;
+                        if paren == 0 {
+                            break;
+                        }
+                        out.push(b')');
+                    }
+                    b'\\' => {
+                        let Some(&esc) = bytes.get(*pos) else { break };
+                        *pos += 1;
+                        match esc {
+                            b'n' => out.push(b'\n'),
+                            b'r' => out.push(b'\r'),
+                            b't' => out.push(b'\t'),
+                            b'b' => out.push(0x08),
+                            b'f' => out.push(0x0C),
+                            b'(' => out.push(b'('),
+                            b')' => out.push(b')'),
+                            b'\\' => out.push(b'\\'),
+                            b'\r' => {
+                                if bytes.get(*pos) == Some(&b'\n') {
+                                    *pos += 1;
+                                }
+                            }
+                            b'\n' => {}
+                            b'0'..=b'7' => {
+                                let mut oct = u32::from(esc - b'0');
+                                for _ in 0..2 {
+                                    if let Some(&d @ b'0'..=b'7') = bytes.get(*pos) {
+                                        oct = (oct << 3) | u32::from(d - b'0');
+                                        *pos += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                out.push((oct & 0xFF) as u8);
+                            }
+                            other => out.push(other),
+                        }
+                    }
+                    other => out.push(other),
+                }
+            }
+            Some(StreamToken::Str(out))
+        }
+        b'<' => {
+            if bytes.get(*pos + 1) == Some(&b'<') {
+                *pos += 2;
+                Some(StreamToken::Op(b"<<".to_vec()))
+            } else {
+                *pos += 1;
+                let mut hex = Vec::new();
+                while let Some(&b) = bytes.get(*pos) {
+                    *pos += 1;
+                    if b == b'>' {
+                        break;
+                    }
+                    hex.push(b);
+                }
+                Some(StreamToken::Str(unhex(&hex).unwrap_or_default()))
+            }
+        }
+        b'>' => {
+            if bytes.get(*pos + 1) == Some(&b'>') {
+                *pos += 2;
+                Some(StreamToken::Op(b">>".to_vec()))
+            } else {
+                *pos += 1;
+                Some(StreamToken::Op(b">".to_vec()))
+            }
+        }
+        b'[' => {
+            *pos += 1;
+            let mut items = Vec::new();
+            while let Some(&b) = bytes.get(*pos) {
+                if is_pdf_ws(b) {
+                    *pos += 1;
+                    continue;
+                }
+                if b == b']' {
+                    *pos += 1;
+                    break;
+                }
+                let before = *pos;
+                if let Some(tok) = next_stream_token(bytes, pos, depth + 1) {
+                    items.push(tok);
+                }
+                if *pos == before {
+                    *pos += 1;
+                }
+            }
+            Some(StreamToken::Array(items))
+        }
+        b']' => {
+            *pos += 1;
+            Some(StreamToken::Op(b"]".to_vec()))
+        }
+        _ => {
+            let mut raw = Vec::new();
+            while let Some(&b) = bytes.get(*pos) {
+                if is_pdf_ws(b) || is_pdf_delim(b) {
+                    break;
+                }
+                raw.push(b);
+                *pos += 1;
+            }
+            if let Ok(s) = std::str::from_utf8(&raw)
+                && let Ok(n) = s.parse::<f64>()
+                && n.is_finite()
+            {
+                return Some(StreamToken::Number(n));
+            }
+            Some(StreamToken::Op(raw))
+        }
+    }
+}
+
+/// Decodes PDFDocEncoding bytes into text used while classifying appearance layers.
+fn decode_pdf_bytes(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| pdfcraft_cos::pdfdoc_char(*b)).collect()
+}
+
+/// Multiplies two PDF affine transformation matrices in content-stream order.
+fn concat_matrix(a: [f64; 6], b: [f64; 6]) -> [f64; 6] {
+    [
+        a[0] * b[0] + a[1] * b[2],
+        a[0] * b[1] + a[1] * b[3],
+        a[2] * b[0] + a[3] * b[2],
+        a[2] * b[1] + a[3] * b[3],
+        a[4] * b[0] + a[5] * b[2] + b[4],
+        a[4] * b[1] + a[5] * b[3] + b[5],
+    ]
+}
+
+/// Reports whether a PDF affine matrix is effectively the identity transform.
+fn is_identity_matrix(m: [f64; 6]) -> bool {
+    (m[0] - 1.0).abs() < 1e-4 && m[1].abs() < 1e-4 && m[2].abs() < 1e-4 && (m[3] - 1.0).abs() < 1e-4 && m[4].abs() < 1e-4 && m[5].abs() < 1e-4
+}
+
+/// Scans a Form XObject stream for text, paths, nested layers, and unsafe operators.
+fn scan_form_stream(bytes: &[u8]) -> FormScan {
+    let mut scan = FormScan {
+        do_calls: Vec::new(),
+        has_text_ops: false,
+        text_lines: Vec::new(),
+        path_points: Vec::new(),
+        has_curves: false,
+        has_re: false,
+        has_inline_image: false,
+        has_other_ops: false,
+        has_unwrapped_do: false,
+    };
+    let mut pos = 0usize;
+    let mut args: Vec<StreamToken> = Vec::new();
+    let mut ctm_stack: Vec<[f64; 6]> = vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]];
+    let mut current_line = String::new();
+    let mut last_tm_y: Option<f64> = None;
+    let flush_line = |line: &mut String, lines: &mut Vec<String>| {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            lines.push(trimmed.to_string());
+        }
+        line.clear();
+    };
+    while pos < bytes.len() {
+        let before = pos;
+        let Some(tok) = next_stream_token(bytes, &mut pos, 0) else { break };
+        if pos == before {
+            pos += 1;
+        }
+        match tok {
+            StreamToken::Op(op) => {
+                if !matches!(op.as_slice(), b"q" | b"Q" | b"cm" | b"Do") {
+                    scan.has_other_ops = true;
+                }
+                match op.as_slice() {
+                    b"BI" => {
+                        scan.has_inline_image = true;
+                        break;
+                    }
+                    b"q" => {
+                        if ctm_stack.len() < 32
+                            && let Some(&top) = ctm_stack.last()
+                        {
+                            ctm_stack.push(top);
+                        }
+                    }
+                    b"Q" => {
+                        if ctm_stack.len() > 1 {
+                            ctm_stack.pop();
+                        } else if let Some(top) = ctm_stack.first_mut() {
+                            *top = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+                        }
+                    }
+                    b"cm" => {
+                        if let Some(nums) = last_n_numbers(&args, 6)
+                            && let Ok(m) = <[f64; 6]>::try_from(nums.as_slice())
+                            && let Some(top) = ctm_stack.last_mut()
+                        {
+                            *top = concat_matrix(m, *top);
+                        }
+                    }
+                    b"Do" => {
+                        if ctm_stack.len() == 1 {
+                            scan.has_unwrapped_do = true;
+                        }
+                        if let Some(StreamToken::Name(name)) = args.last() {
+                            let ctm = ctm_stack.last().copied().unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+                            scan.do_calls.push(DoCall { name: name.clone(), matrix: (!is_identity_matrix(ctm)).then_some(ctm) });
+                        }
+                    }
+                    b"BT" => {
+                        scan.has_text_ops = true;
+                        last_tm_y = None;
+                    }
+                    b"ET" => {
+                        scan.has_text_ops = true;
+                        flush_line(&mut current_line, &mut scan.text_lines);
+                        last_tm_y = None;
+                    }
+                    b"Td" | b"TD" => {
+                        if let Some(nums) = last_n_numbers(&args, 2)
+                            && let [_, ty] = nums.as_slice()
+                            && ty.abs() > 0.01
+                        {
+                            flush_line(&mut current_line, &mut scan.text_lines);
+                        }
+                    }
+                    b"T*" => {
+                        flush_line(&mut current_line, &mut scan.text_lines);
+                    }
+                    b"Tm" => {
+                        if let Some(nums) = last_n_numbers(&args, 6)
+                            && let [.., ty] = nums.as_slice()
+                        {
+                            if last_tm_y.is_some_and(|prev| (*ty - prev).abs() > 0.1) {
+                                flush_line(&mut current_line, &mut scan.text_lines);
+                            }
+                            last_tm_y = Some(*ty);
+                        }
+                    }
+                    b"Tj" => {
+                        scan.has_text_ops = true;
+                        if let Some(StreamToken::Str(s)) = args.last() {
+                            current_line.push_str(&decode_pdf_bytes(s));
+                        }
+                    }
+                    b"'" | b"\"" => {
+                        scan.has_text_ops = true;
+                        flush_line(&mut current_line, &mut scan.text_lines);
+                        if let Some(StreamToken::Str(s)) = args.last() {
+                            current_line.push_str(&decode_pdf_bytes(s));
+                        }
+                    }
+                    b"TJ" => {
+                        scan.has_text_ops = true;
+                        if let Some(StreamToken::Array(items)) = args.last() {
+                            for item in items {
+                                match item {
+                                    StreamToken::Str(s) => current_line.push_str(&decode_pdf_bytes(s)),
+                                    StreamToken::Number(n) if *n <= -120.0 && !current_line.ends_with(' ') => current_line.push(' '),
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    b"m" | b"l" => {
+                        if let Some(nums) = last_n_numbers(&args, 2)
+                            && let [x, y] = nums.as_slice()
+                        {
+                            scan.path_points.push((*x, *y));
+                        }
+                    }
+                    b"v" | b"y" => {
+                        scan.has_curves = true;
+                        if let Some(nums) = last_n_numbers(&args, 4)
+                            && let [x1, y1, x2, y2] = nums.as_slice()
+                        {
+                            scan.path_points.push((*x1, *y1));
+                            scan.path_points.push((*x2, *y2));
+                        }
+                    }
+                    b"c" => {
+                        scan.has_curves = true;
+                        if let Some(nums) = last_n_numbers(&args, 6)
+                            && let [x1, y1, x2, y2, x3, y3] = nums.as_slice()
+                        {
+                            scan.path_points.push((*x1, *y1));
+                            scan.path_points.push((*x2, *y2));
+                            scan.path_points.push((*x3, *y3));
+                        }
+                    }
+                    b"re" if last_n_numbers(&args, 4).is_some() => {
+                        scan.has_re = true;
+                    }
+                    _ => {}
+                }
+                args.clear();
+            }
+            other => {
+                if args.len() >= 16 {
+                    args.remove(0);
+                }
+                args.push(other);
+            }
+        }
+    }
+    flush_line(&mut current_line, &mut scan.text_lines);
+    scan
+}
+
+fn last_n_numbers(args: &[StreamToken], n: usize) -> Option<Vec<f64>> {
+    if args.len() < n {
+        return None;
+    }
+    let slice = args.get(args.len() - n..)?;
+    let mut out = Vec::with_capacity(n);
+    for tok in slice {
+        match tok {
+            StreamToken::Number(v) => out.push(*v),
+            _ => return None,
+        }
+    }
+    Some(out)
 }

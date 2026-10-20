@@ -77,7 +77,7 @@ pub enum ImageEdit {
     },
     Delete,
 }
-pub use pdfcraft_fonts::{MAX_SIGNATURE_CHARS, ScriptOutline, script_missing, script_outline};
+pub use pdfcraft_fonts::{MAX_SIGNATURE_CHARS, ScriptOutline, script_missing, script_outline, undrawable_message};
 
 /// Fill & Sign: `text` in the script font as a typed signature, its left edge at `at` (user
 /// space, vertically centred) and `height` points tall. `None` for text with no outlines.
@@ -701,12 +701,15 @@ fn is_placeholder_title(title: &str) -> bool {
 }
 
 /// What is displayed: the working file, plus (in memory only, never saved) the appearances
-/// PdfCraft draws for comments that have none ([`pdfcraft_annot::with_missing_appearances`]).
+/// PdfCraft draws for comments that have none ([`pdfcraft_annot::with_missing_appearances`]) and
+/// the validated layered signature appearances ([`pdfcraft_sign::pdf::with_validated_appearances`]).
 /// The working file is unchanged, and so is everything that reads it (saving, signatures, …).
-fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>) -> Arc<Vec<u8>> {
-    let Some(display) = editor.and_then(|e| pdfcraft_annot::with_missing_appearances_cached(&e.cos, &mut e.appearances)) else {
-        return bytes.clone();
-    };
+fn display_bytes(editor: Option<&mut Editor>, bytes: &Arc<Vec<u8>>, signatures: &[SignatureInfo]) -> Arc<Vec<u8>> {
+    let Some(e) = editor else { return bytes.clone() };
+    let comments = pdfcraft_annot::with_missing_appearances_cached(&e.cos, &mut e.appearances);
+    let base = comments.as_ref().unwrap_or(&e.cos);
+    let sigs = pdfcraft_sign::pdf::with_validated_appearances(base, signatures);
+    let Some(display) = sigs.or(comments) else { return bytes.clone() };
     // Writing fails only as saving the document would; the page then shows as it always did.
     write_incremental(&display, &SaveOptions::default()).map(Arc::new).unwrap_or_else(|_| bytes.clone())
 }
@@ -3005,7 +3008,9 @@ impl Session {
             Ok(Err(e)) => (None, Some(e.to_string())),
             Err(_) => (None, Some("the document structure could not be read for editing".into())),
         };
-        let display = display_bytes(editor.as_mut(), &bytes);
+        let sig_cache = Arc::new(pdfcraft_sign::DigestCache::default());
+        let signatures = editor.as_ref().map(|e| signatures_of(&e.cos, &bytes, &self.trust, &sig_cache)).unwrap_or_default();
+        let display = display_bytes(editor.as_mut(), &bytes, &signatures);
         let renderer = RenderPool::new(display.clone(), render_threads(), config.clone());
         let (form, adopted) = editor
             .as_ref()
@@ -3034,8 +3039,6 @@ impl Session {
             })
             .unwrap_or_default();
         let links = editor.as_ref().map(|e| pdfcraft_annot::links::list(&e.cos)).unwrap_or_default();
-        let sig_cache = Arc::new(pdfcraft_sign::DigestCache::default());
-        let signatures = editor.as_ref().map(|e| signatures_of(&e.cos, &bytes, &self.trust, &sig_cache)).unwrap_or_default();
         self.next_id += 1;
         let id = DocId(self.next_id);
         self.docs.push(Document {
@@ -3345,7 +3348,7 @@ impl Session {
         if !doc.signatures.is_empty() {
             doc.signatures = signatures_of(&editor.cos, &bytes, &doc.trust, &doc.sig_cache);
         }
-        doc.display = display_bytes(Some(editor), &bytes);
+        doc.display = display_bytes(Some(editor), &bytes, &doc.signatures);
         doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
         doc.bytes = bytes;
         Ok(())
@@ -3398,7 +3401,7 @@ impl Session {
         if !doc.signatures.is_empty() {
             doc.signatures = signatures_of(&editor.cos, &bytes, &doc.trust, &doc.sig_cache);
         }
-        doc.display = display_bytes(Some(editor), &bytes);
+        doc.display = display_bytes(Some(editor), &bytes, &doc.signatures);
         doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
         doc.bytes = bytes;
         doc.fonts_stale = true;
@@ -3443,7 +3446,7 @@ impl Session {
         doc.added = marker_scan.added;
         doc.links = pdfcraft_annot::links::list(&editor.cos);
         doc.signatures = signatures_of(&editor.cos, &bytes, &doc.trust, &doc.sig_cache);
-        doc.display = display_bytes(Some(editor), &bytes);
+        doc.display = display_bytes(Some(editor), &bytes, &doc.signatures);
         doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
         doc.bytes = bytes;
         Ok(())
@@ -4100,6 +4103,12 @@ impl Session {
             doc.trust = self.trust.clone();
             if let Some(e) = doc.editor.as_ref() {
                 doc.signatures = signatures_of(&e.cos, &doc.bytes, &doc.trust, &doc.sig_cache);
+            }
+            // The validated-signature appearance follows trust, so the page is redrawn too.
+            if !doc.signatures.is_empty() && doc.editor.is_some() {
+                let bytes = doc.bytes.clone();
+                doc.display = display_bytes(doc.editor.as_mut(), &bytes, &doc.signatures);
+                doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
             }
         }
     }

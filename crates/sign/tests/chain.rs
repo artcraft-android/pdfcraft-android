@@ -282,6 +282,21 @@ fn a_trusted_signer_whose_certificate_may_not_sign_is_not_valid() {
 }
 
 #[test]
+fn a_smart_cards_certificates_that_may_not_sign_say_why_in_id_lists() {
+    // A DoD CAC's four certificates, all under the same name; only the signing one may sign.
+    let r = root();
+    let clause = |exts: &[Vec<u8>]| signer_with("DOE.JANE.1234567890", &r, exts).cert.signing_problem_clause();
+    let encryption = clause(&[key_usage(KEY_ENCIPHERMENT), extended_key_usage(&["1.3.6.1.5.5.7.3.4"])]);
+    assert_eq!(encryption.as_deref(), Some("it does not allow digital signatures (its key usage has neither digital signature nor non-repudiation)"));
+    let logon = clause(&[key_usage(DIGITAL_SIGNATURE), extended_key_usage(&["1.3.6.1.4.1.311.20.2.2", "1.3.6.1.5.5.7.3.2"])]);
+    assert_eq!(logon.as_deref(), Some("it is not issued for signing documents (its extended key usage has no document-signing purpose)"));
+    let card_auth = clause(&[key_usage(DIGITAL_SIGNATURE), extended_key_usage(&["2.16.840.1.101.3.6.8"])]);
+    assert_eq!(card_auth, logon);
+    let signing = clause(&[key_usage(DIGITAL_SIGNATURE | 0x40), extended_key_usage(&["1.3.6.1.5.5.7.3.4", "1.3.6.1.4.1.311.10.3.12"])]);
+    assert_eq!(signing, None);
+}
+
+#[test]
 fn unreadable_constraint_extensions_fail_closed() {
     // keyUsage present but not a BIT STRING: no usage at all, so no keyCertSign.
     let bad_usage = ext("2.5.29.15", &[0xff, 0x00]);
@@ -297,4 +312,31 @@ fn unreadable_constraint_extensions_fail_closed() {
     let garbage = ext("2.5.29.19", &[0x30, 0x05, 0x01]);
     let c = issue("Garbled Constraints", None, FOREVER, &[garbage]);
     assert!(c.cert.has_basic_constraints && !c.cert.is_ca && !c.cert.may_issue());
+}
+
+#[test]
+fn an_unreadable_extended_key_usage_allows_no_purpose() {
+    // An extendedKeyUsage that is present restricts the key even when it doesn't parse (#1807):
+    // truncated, critical or not; a SET instead of a SEQUENCE; or a member that isn't an OID.
+    // Each would otherwise read as "no restriction", or as only its readable members.
+    let r = root();
+    let any = der::oid("2.5.29.37.0");
+    let truncated = [0x30, 0x05, 0x06];
+    let malformed = [
+        ext("2.5.29.37", &truncated),
+        der::seq(&[&der::oid("2.5.29.37"), &der::octets(&truncated)]),
+        ext("2.5.29.37", &der::tlv(tag::SET, &any)),
+        ext("2.5.29.37", &der::seq(&[&der::int(1), &any])),
+    ];
+    for (i, eku) in malformed.into_iter().enumerate() {
+        let signer = signer_with("Malformed EKU", &r, &[key_usage(DIGITAL_SIGNATURE), eku]);
+        assert_eq!(signer.cert.extended_key_usage.as_deref(), Some(&[][..]), "case {i}");
+        let (status, details) = verdict(signer, vec![], &r.cert);
+        assert_eq!(status, Status::Unknown, "case {i}: {details:?}");
+        assert!(details.iter().any(|d| d.contains("not issued for signing documents")), "case {i}: {details:?}");
+    }
+    // The same document-signing purpose, well formed, may sign.
+    let (status, details) =
+        verdict(signer_with("Good EKU", &r, &[key_usage(DIGITAL_SIGNATURE), extended_key_usage(&["2.5.29.37.0"])]), vec![], &r.cert);
+    assert_eq!(status, Status::Valid, "{details:?}");
 }

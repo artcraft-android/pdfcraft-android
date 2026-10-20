@@ -68,6 +68,9 @@ import org.json.JSONObject
 // here), and what the signatures in a document say. The engine signs (PAdES, incrementally) and
 // validates; these are the screens around it.
 
+/** The shortest password a new digital ID may have; the engine enforces the same minimum (`pkcs12::MIN_PASSWORD_CHARS`). */
+const val MIN_ID_PASSWORD = 8
+
 /** A signer's certificate, as a signature's details show it. */
 data class SignerCert(val name: String, val issuer: String, val validTo: String?, val sha256: String, val selfSigned: Boolean)
 
@@ -410,11 +413,11 @@ fun CreateIdScreen(vm: AppViewModel) {
     var again by remember { mutableStateOf("") }
     val problem = when {
         name.isBlank() -> null
-        password.isNotEmpty() && password.length < 6 -> "The password needs at least 6 characters."
+        password.isNotEmpty() && password.length < MIN_ID_PASSWORD -> "The password needs at least $MIN_ID_PASSWORD characters."
         again.isNotEmpty() && again != password -> "The passwords don't match."
         else -> null
     }
-    val ok = name.isNotBlank() && password.length >= 6 && again == password
+    val ok = name.isNotBlank() && password.length >= MIN_ID_PASSWORD && again == password
     Column(Modifier.fillMaxSize().background(c.surface).pointerInput(Unit) { detectTapGestures() }.safeTopPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { vm.idCreate = false }) { Text("Cancel", color = c.accent) }

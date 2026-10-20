@@ -1330,7 +1330,7 @@ fn protecting_through_tools() {
 fn signing_an_encrypted_form_through_tools() {
     let dir = workdir("sign-encrypted");
     let mut a = auto(&dir);
-    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret1", "path": "ada.p12" }));
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
     let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
     let field = ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "signature", "rect": [20, 200, 180, 250] }))["field"]
         .as_str()
@@ -1343,12 +1343,12 @@ fn signing_an_encrypted_form_through_tools() {
     assert_eq!(ok(&mut b, "doc_info", json!({ "doc": form }))["security"]["protected"], true);
     match b.call(
         "sign_document",
-        &json!({ "doc": form, "id": "ada.p12", "password": "secret1", "page": 1, "rect": [200, 200, 380, 250], "out": "new.pdf" }),
+        &json!({ "doc": form, "id": "ada.p12", "password": "secret12", "page": 1, "rect": [200, 200, 380, 250], "out": "new.pdf" }),
     ) {
         Err(ToolError::Failed(m)) => assert!(m.contains("adding new signature fields"), "{m}"),
         other => panic!("a new field needs the permissions password: {other:?}"),
     }
-    let r = ok(&mut b, "sign_document", json!({ "doc": form, "id": "ada.p12", "password": "secret1", "field": field, "out": "signed.pdf" }));
+    let r = ok(&mut b, "sign_document", json!({ "doc": form, "id": "ada.p12", "password": "secret12", "field": field, "out": "signed.pdf" }));
     assert_eq!((r["signature"]["signer"].as_str(), r["signature"]["status"].as_str()), (Some("Ada Lovelace"), Some("unknown")));
     let original = std::fs::read(dir.join("form.pdf")).unwrap();
     let signed = std::fs::read(dir.join("signed.pdf")).unwrap();
@@ -1356,7 +1356,7 @@ fn signing_an_encrypted_form_through_tools() {
     let mut c = auto(&dir);
     let re = ok(&mut c, "doc_open", json!({ "path": "signed.pdf" }))["doc"].as_u64().unwrap();
     assert_eq!(ok(&mut c, "doc_info", json!({ "doc": re }))["security"]["protected"], true, "still encrypted");
-    ok(&mut c, "sign_trust", json!({ "paths": ["ada.p12"], "password": "secret1" }));
+    ok(&mut c, "sign_trust", json!({ "paths": ["ada.p12"], "password": "secret12" }));
     let list = ok(&mut c, "sign_list", json!({ "doc": re }));
     assert_eq!((list["all_valid"].as_bool(), list["signatures"][0]["status"].as_str()), (Some(true), Some("valid")), "{list}");
 }
@@ -3513,12 +3513,12 @@ fn signing_with_an_image_typed_or_drawn_graphic_through_tools() {
     std::fs::write(dir.join("logo.png"), png).unwrap();
     std::fs::write(dir.join("broken.png"), b"broken").unwrap();
     let mut a = auto(&dir);
-    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret1", "path": "ada.p12" }));
+    ok(&mut a, "sign_id_create", json!({ "name": "Ada Lovelace", "key": "p256", "password": "secret12", "path": "ada.p12" }));
     let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
     let sign = |a: &mut Automation, rect: [f64; 4], graphic: Value, out: &str| {
         a.call(
             "sign_document",
-            &json!({ "doc": doc, "id": "ada.p12", "password": "secret1", "page": 1, "rect": rect, "graphic": graphic, "out": out }),
+            &json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "page": 1, "rect": rect, "graphic": graphic, "out": out }),
         )
     };
     for (graphic, why) in [
@@ -3538,7 +3538,7 @@ fn signing_with_an_image_typed_or_drawn_graphic_through_tools() {
     // A missing file fails as it does for every tool that reads one.
     assert!(matches!(sign(&mut a, [20.0, 200.0, 180.0, 250.0], json!({ "image": "missing.png" }), "bad.pdf"), Err(ToolError::Failed(_))));
     // An invisible signature shows nothing, so a graphic for one is a mistake.
-    let r = a.call("sign_document", &json!({ "doc": doc, "id": "ada.p12", "password": "secret1", "graphic": { "text": "Ada" }, "out": "bad.pdf" }));
+    let r = a.call("sign_document", &json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "graphic": { "text": "Ada" }, "out": "bad.pdf" }));
     assert!(matches!(r, Err(ToolError::InvalidArgs(_))), "{r:?}");
     assert!(!dir.join("bad.pdf").exists());
 
@@ -3574,7 +3574,7 @@ fn digital_ids_signing_and_validation_through_tools() {
     let id = ok(
         &mut a,
         "sign_id_create",
-        json!({ "name": "Ada Lovelace", "organization": "Analytical Engines", "email": "ada@example.com", "country": "GB", "key": "p256", "password": "secret1", "path": "ada.p12" }),
+        json!({ "name": "Ada Lovelace", "organization": "Analytical Engines", "email": "ada@example.com", "country": "GB", "key": "p256", "password": "secret12", "path": "ada.p12" }),
     );
     assert_eq!(id["certificate"]["subject"], "C=GB, O=Analytical Engines, CN=Ada Lovelace, E=ada@example.com");
     assert_eq!(id["certificate"]["self_signed"], true);
@@ -3601,7 +3601,7 @@ fn digital_ids_signing_and_validation_through_tools() {
     let r = ok(
         &mut a,
         "sign_document",
-        json!({ "doc": doc, "id": "ada.p12", "password": "secret1", "page": 2, "rect": [20, 200, 180, 250], "reason": "Approved", "location": "London", "out": "signed.pdf" }),
+        json!({ "doc": doc, "id": "ada.p12", "password": "secret12", "page": 2, "rect": [20, 200, 180, 250], "reason": "Approved", "location": "London", "out": "signed.pdf" }),
     );
     assert_eq!(r["signature"]["status"], "unknown");
     assert_eq!(r["signature"]["signer"], "Ada Lovelace");
@@ -3611,7 +3611,7 @@ fn digital_ids_signing_and_validation_through_tools() {
     assert!(dir.join("signed.pdf").exists());
 
     // Trust the ID: valid; comment afterwards: still valid, change allowed.
-    let t = ok(&mut a, "sign_trust", json!({ "paths": ["ada.p12"], "password": "secret1" }));
+    let t = ok(&mut a, "sign_trust", json!({ "paths": ["ada.p12"], "password": "secret12" }));
     assert_eq!(t["trusted"].as_array().unwrap().len(), 1);
     let list = ok(&mut a, "sign_list", json!({ "doc": doc }));
     assert_eq!((list["all_valid"].as_bool(), list["signatures"][0]["status"].as_str()), (Some(true), Some("valid")));
