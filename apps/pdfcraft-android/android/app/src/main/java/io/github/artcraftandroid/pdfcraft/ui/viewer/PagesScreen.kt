@@ -51,12 +51,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.engine.toBitmap
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
@@ -124,13 +127,13 @@ fun PagesScreen(vm: AppViewModel, doc: OpenDocument, onClose: () -> Unit) {
         ) {
             Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) {
                 if (organizing) {
-                    BarIcon(LucideIcons.Check, if (picked.isEmpty()) "Done" else "Back", ::back, tint = c.toolAccent)
+                    BarIcon(LucideIcons.Check, stringResource(if (picked.isEmpty()) R.string.common_done else R.string.common_back), ::back, tint = c.toolAccent)
                 } else {
-                    BarIcon(LucideIcons.ArrowLeft, "Back", ::back, iconSize = 27.dp)
+                    BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), ::back, iconSize = 27.dp)
                 }
             }
             Text(
-                if (organizing && picked.isNotEmpty()) "Selected ${picked.size}" else if (organizing) "Select pages" else "Pages",
+                if (organizing && picked.isNotEmpty()) pluralStringResource(R.plurals.pages_selected_count, picked.size, picked.size) else if (organizing) stringResource(R.string.pages_select) else stringResource(R.string.pages_title),
                 color = c.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
             )
             if (organizing && exporting == null) {
@@ -164,6 +167,7 @@ fun PagesScreen(vm: AppViewModel, doc: OpenDocument, onClose: () -> Unit) {
                     val isSel = selected[i] == true
                     val isCurrent = !organizing && i == doc.viewer.currentPage
                     val highlighted = isSel || isCurrent || dragTo == i && dragFrom != i
+                    val pageLabel = stringResource(R.string.pages_page, i + 1)
                     Column(
                         Modifier
                             .graphicsLayer { alpha = if (dragFrom == i) 0.4f else 1f }
@@ -214,7 +218,7 @@ fun PagesScreen(vm: AppViewModel, doc: OpenDocument, onClose: () -> Unit) {
                                     close()
                                 }
                             }
-                            .semantics { contentDescription = "Page ${i + 1}" },
+                            .semantics { contentDescription = pageLabel },
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Box(
@@ -255,23 +259,23 @@ fun PagesScreen(vm: AppViewModel, doc: OpenDocument, onClose: () -> Unit) {
         ) {
             if (exporting != null) {
                 // picking the pages to export: save them to the phone's pictures, or share them
-                OrganizeItem(LucideIcons.Save, "Save", enabled) { vm.writeImages(doc, exporting, picked, share = false) }
-                OrganizeItem(LucideIcons.Share2, "Share", enabled) { vm.writeImages(doc, exporting, picked, share = true) }
+                OrganizeItem(LucideIcons.Save, stringResource(R.string.common_save), enabled) { vm.writeImages(doc, exporting, picked, share = false) }
+                OrganizeItem(LucideIcons.Share2, stringResource(R.string.common_share), enabled) { vm.writeImages(doc, exporting, picked, share = true) }
             } else if (organizing) {
-                OrganizeItem(LucideIcons.FilePlus, "Insert Page", true) { insertMenu = true }
-                OrganizeItem(LucideIcons.FileOutput, "Extract", enabled) { vm.extractPages(doc, picked) }
-                OrganizeItem(LucideIcons.Trash2, "Delete", enabled && picked.size < doc.pageCount) {
+                OrganizeItem(LucideIcons.FilePlus, stringResource(R.string.pages_insert_page), true) { insertMenu = true }
+                OrganizeItem(LucideIcons.FileOutput, stringResource(R.string.pages_extract), enabled) { vm.extractPages(doc, picked) }
+                OrganizeItem(LucideIcons.Trash2, stringResource(R.string.common_delete), enabled && picked.size < doc.pageCount) {
                     vm.runTool(doc, "page_delete", mapOf("pages" to picked.map { it + 1 }))
                     selected.clear()
                 }
-                OrganizeItem(LucideIcons.RotateCcw, "Left", enabled) { vm.runTool(doc, "page_rotate", mapOf("pages" to picked.map { it + 1 }, "degrees" to -90)) }
-                OrganizeItem(LucideIcons.RotateCw, "Right", enabled) { vm.runTool(doc, "page_rotate", mapOf("pages" to picked.map { it + 1 }, "degrees" to 90)) }
+                OrganizeItem(LucideIcons.RotateCcw, stringResource(R.string.pages_rotate_left), enabled) { vm.runTool(doc, "page_rotate", mapOf("pages" to picked.map { it + 1 }, "degrees" to -90)) }
+                OrganizeItem(LucideIcons.RotateCw, stringResource(R.string.pages_rotate_right), enabled) { vm.runTool(doc, "page_rotate", mapOf("pages" to picked.map { it + 1 }, "degrees" to 90)) }
             } else {
-                OrganizeItem(LucideIcons.FilePenLine, "Edit PDF", true) {
+                OrganizeItem(LucideIcons.FilePenLine, stringResource(R.string.common_tool_edit_pdf), true) {
                     close()
                     vm.enterTool(doc, ViewerTool.Edit)
                 }
-                OrganizeItem(LucideIcons.Crop, "Crop pages", true) {
+                OrganizeItem(LucideIcons.Crop, stringResource(R.string.common_tool_crop), true) {
                     close()
                     vm.runQuickTool(doc, QuickTool.Crop)
                 }
@@ -289,13 +293,13 @@ fun PagesScreen(vm: AppViewModel, doc: OpenDocument, onClose: () -> Unit) {
             else -> first + 1
         }
         PdfSheet(onDismiss = { insertMenu = false }, dim = true) {
-            SheetTitle("Insert")
+            SheetTitle(stringResource(R.string.pages_insert))
             val c = pdfColors
             for (option in listOf(false, true)) {
                 val label = when {
-                    first == null || last == null -> if (option) "At the end" else "At the start"
-                    option -> "After page ${last + 1}"
-                    else -> "Before page ${first + 1}"
+                    first == null || last == null -> stringResource(if (option) R.string.pages_at_end else R.string.pages_at_start)
+                    option -> stringResource(R.string.pages_after_page, last + 1)
+                    else -> stringResource(R.string.pages_before_page, first + 1)
                 }
                 Row(
                     Modifier.fillMaxWidth().clickable(role = Role.RadioButton) { after = option }.padding(horizontal = 12.dp, vertical = 2.dp),
@@ -309,9 +313,9 @@ fun PagesScreen(vm: AppViewModel, doc: OpenDocument, onClose: () -> Unit) {
                 }
             }
             io.github.artcraftandroid.pdfcraft.ui.SheetDivider()
-            SheetRow(LucideIcons.File, "Blank page", { insertMenu = false; vm.runTool(doc, "page_insert_blank", mapOf("at" to at)) })
-            SheetRow(LucideIcons.FileStack, "From another file", { insertMenu = false; vm.pickInsertFile(doc, at) })
-            SheetRow(LucideIcons.Camera, "From a scan", { insertMenu = false; vm.insertScanAt = doc to at; vm.startScan() })
+            SheetRow(LucideIcons.File, stringResource(R.string.pages_blank_page), { insertMenu = false; vm.runTool(doc, "page_insert_blank", mapOf("at" to at)) })
+            SheetRow(LucideIcons.FileStack, stringResource(R.string.pages_from_file), { insertMenu = false; vm.pickInsertFile(doc, at) })
+            SheetRow(LucideIcons.Camera, stringResource(R.string.pages_from_scan), { insertMenu = false; vm.insertScanAt = doc to at; vm.startScan() })
             Spacer(Modifier.height(12.dp))
         }
     }

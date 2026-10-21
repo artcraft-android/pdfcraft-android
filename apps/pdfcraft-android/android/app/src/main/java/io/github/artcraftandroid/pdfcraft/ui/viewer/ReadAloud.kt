@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -65,10 +66,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.ReadingBlock
 import io.github.artcraftandroid.pdfcraft.core.TextRange
 import io.github.artcraftandroid.pdfcraft.engine.Engine
 import io.github.artcraftandroid.pdfcraft.engine.toBitmap
+import io.github.artcraftandroid.pdfcraft.text
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
 import io.github.artcraftandroid.pdfcraft.ui.OpenDocument
 import io.github.artcraftandroid.pdfcraft.ui.PdfSheet
@@ -146,7 +149,7 @@ class ReadAloud(
     private val tts: TextToSpeech = TextToSpeech(context.applicationContext) { status ->
         scope.launch {
             if (status != TextToSpeech.SUCCESS) {
-                problem = "Read aloud needs a text-to-speech voice on this phone."
+                problem = text(R.string.read_aloud_no_voice)
                 return@launch
             }
             ready = true
@@ -446,6 +449,7 @@ fun BoxScope.ReadAloudBar(vm: io.github.artcraftandroid.pdfcraft.ui.AppViewModel
     val c = pdfColors
     var speeds by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
+    val openPlayer = stringResource(R.string.read_aloud_open_player)
     Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(c.surface)) {
         ProgressTrack(r.progress, Modifier.fillMaxWidth().height(6.dp))
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(c.divider))
@@ -455,12 +459,12 @@ fun BoxScope.ReadAloudBar(vm: io.github.artcraftandroid.pdfcraft.ui.AppViewModel
         ) {
             Box(
                 Modifier.size(40.dp).clip(CircleShape).background(c.pageCard).clickable(role = Role.Button) { expanded = true }
-                    .semantics { contentDescription = "Open the player" },
+                    .semantics { contentDescription = openPlayer },
                 contentAlignment = Alignment.Center,
             ) { Icon(LucideIcons.ChevronUp, null, tint = c.label, modifier = Modifier.size(24.dp)) }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
                 SkipButton(back = true, size = 43.dp) { r.skip(false) }
-                PlayerButton(if (r.playing) LucideIcons.Pause else LucideIcons.Play, if (r.playing) "Pause" else if (r.finished) "Read again" else "Play", 43.dp) {
+                PlayerButton(if (r.playing) LucideIcons.Pause else LucideIcons.Play, stringResource(if (r.playing) R.string.common_pause else if (r.finished) R.string.read_aloud_read_again else R.string.common_play), 43.dp) {
                     if (r.playing) r.pause() else r.play()
                 }
                 SkipButton(back = false, size = 43.dp) { r.skip(true) }
@@ -500,9 +504,10 @@ private fun PlayerButton(icon: ImageVector, description: String, size: androidx.
 @Composable
 private fun SkipButton(back: Boolean, size: androidx.compose.ui.unit.Dp, iconSize: androidx.compose.ui.unit.Dp = 26.dp, onClick: () -> Unit) {
     val c = pdfColors
+    val label = stringResource(if (back) R.string.read_aloud_back_15 else R.string.read_aloud_forward_15)
     Box(
         Modifier.size(size).clip(CircleShape).clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = if (back) "Back 15 seconds" else "Forward 15 seconds" },
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         Icon(if (back) LucideIcons.RotateCcw else LucideIcons.RotateCw, null, tint = c.label, modifier = Modifier.size(iconSize))
@@ -546,6 +551,7 @@ private fun ReadAloudFull(vm: io.github.artcraftandroid.pdfcraft.ui.AppViewModel
     var thumb by remember(r.page) { mutableStateOf<ImageBitmap?>(null) }
     var speeds by remember { mutableStateOf(false) }
     var voices by remember { mutableStateOf(false) }
+    val closePlayer = stringResource(R.string.read_aloud_close_player)
     LaunchedEffect(r.page) {
         val eng = vm.engine ?: return@LaunchedEffect
         val size = doc.info.pages.getOrNull(r.page) ?: return@LaunchedEffect
@@ -559,7 +565,7 @@ private fun ReadAloudFull(vm: io.github.artcraftandroid.pdfcraft.ui.AppViewModel
             Box(Modifier.fillMaxWidth()) {
                 Box(
                     Modifier.size(40.dp).clip(CircleShape).background(c.pageCard).clickable(role = Role.Button, onClick = onClose)
-                        .semantics { contentDescription = "Close the player" },
+                        .semantics { contentDescription = closePlayer },
                     contentAlignment = Alignment.Center,
                 ) { Icon(LucideIcons.ChevronDown, null, tint = c.label, modifier = Modifier.size(22.dp)) }
             }
@@ -580,7 +586,7 @@ private fun ReadAloudFull(vm: io.github.artcraftandroid.pdfcraft.ui.AppViewModel
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 SkipButton(back = true, size = 58.dp, iconSize = 32.dp) { r.skip(false) }
                 Box(Modifier.size(80.dp).clip(CircleShape).background(c.divider), contentAlignment = Alignment.Center) {
-                    PlayerButton(if (r.playing) LucideIcons.Pause else LucideIcons.Play, if (r.playing) "Pause" else "Play", 80.dp, iconSize = 40.dp) {
+                    PlayerButton(if (r.playing) LucideIcons.Pause else LucideIcons.Play, stringResource(if (r.playing) R.string.common_pause else R.string.common_play), 80.dp, iconSize = 40.dp) {
                         if (r.playing) r.pause() else r.play()
                     }
                 }
@@ -593,7 +599,7 @@ private fun ReadAloudFull(vm: io.github.artcraftandroid.pdfcraft.ui.AppViewModel
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Icon(LucideIcons.AudioLines, null, tint = c.icon, modifier = Modifier.size(24.dp))
-                    Text("Voice", color = c.textSecondary, fontSize = 13.sp)
+                    Text(stringResource(R.string.read_aloud_voice), color = c.textSecondary, fontSize = 13.sp)
                 }
                 Box {
                     Text(speedLabel(r.speed), color = c.textSecondary, fontSize = 16.sp, modifier = Modifier.clickable { speeds = true }.padding(8.dp))
@@ -618,14 +624,14 @@ private fun LanguageSheet(r: ReadAloud, onVoiceSettings: () -> Unit, onDismiss: 
     val current = remember(langs, r.language) { languageIndex(langs, r.language) }
     val list = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = (current - 2).coerceAtLeast(0))
     io.github.artcraftandroid.pdfcraft.ui.PdfSheet(onDismiss = onDismiss, dim = true) {
-        io.github.artcraftandroid.pdfcraft.ui.SheetTitle("Choose language")
+        io.github.artcraftandroid.pdfcraft.ui.SheetTitle(stringResource(R.string.read_aloud_choose_language))
         androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp), state = list) {
             items(langs.size) { i ->
                 val l = langs[i]
                 io.github.artcraftandroid.pdfcraft.ui.SheetRow(null, l.getDisplayName(Locale.getDefault()), { r.chooseLanguage(l); onDismiss() }, checked = i == current)
             }
         }
-        io.github.artcraftandroid.pdfcraft.ui.SheetRow(LucideIcons.Settings, "Voice settings", onVoiceSettings)
+        io.github.artcraftandroid.pdfcraft.ui.SheetRow(LucideIcons.Settings, stringResource(R.string.read_aloud_voice_settings), onVoiceSettings)
         Spacer(Modifier.height(8.dp))
     }
 }

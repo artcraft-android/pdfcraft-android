@@ -215,6 +215,7 @@ PdfCraft for Android is in beta.
 | Export to Word, RTF, Excel, PowerPoint, JPEG and PNG | ✅ · Word 97 ⬜ |
 | Recognize text | ✅ (the Latin alphabet without accents) |
 | A customizable quick toolbar, upright and sideways layouts, light and dark themes | ✅ |
+| Translations: all of the app's text is ready to translate ([how](#translating)) | ✅ · languages besides English ⬜ |
 | AI assistant, cloud storage, sharing for review | 🚫 PdfCraft is a local app |
 
 <sub>✅ works today · 🚧 in progress · ⬜ not started · 🚫 not planned</sub>
@@ -243,6 +244,24 @@ Build time dependencies:
 </details>
 
 *Builds are only tested on Windows 11.*
+
+<br>
+
+## Translating
+
+All of PdfCraft's text is in one file:
+[`apps/pdfcraft-android/android/app/src/main/res/values/strings.xml`](apps/pdfcraft-android/android/app/src/main/res/values/strings.xml).
+To add a language:
+
+* copy it to a `values-<language>` folder beside it: `values-es/strings.xml` for Spanish, `values-pt-rBR/strings.xml` for Brazilian Portuguese
+* translate the text between the tags; keep each `name`, the placeholders (`%1$s`, `%2$d`, which you may move) and escapes such as `\'`
+* leave out anything you haven't translated yet: it shows in English
+* open a pull request
+
+The store listing is in `fastlane/metadata/android/en-US/`; a copy in a folder for your language (`es-ES`, `pt-BR`)
+translates it too. On Android 13 and newer, PdfCraft's language can be set on its own under Settings ▸ Apps ▸
+PdfCraft ▸ Language. A few messages from the PDF engine, such as some errors and the names in Undo, are English
+for now.
 
 <br>
 

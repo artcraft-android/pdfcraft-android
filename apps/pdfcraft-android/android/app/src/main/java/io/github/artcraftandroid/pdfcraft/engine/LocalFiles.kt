@@ -9,6 +9,7 @@ import android.content.ContentUris
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.fileThumbnail
 import java.io.File
 import java.security.MessageDigest
@@ -57,7 +58,7 @@ object LocalFiles {
         context.contentResolver.query(doc, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         }
-    }.getOrNull() ?: tree.lastPathSegment?.substringAfterLast(':')?.ifEmpty { null } ?: "Folder"
+    }.getOrNull() ?: tree.lastPathSegment?.substringAfterLast(':')?.ifEmpty { null } ?: context.getString(R.string.files_folder_unnamed)
 
     fun scan(context: Context): List<LocalPdf> {
         val resolver = context.contentResolver

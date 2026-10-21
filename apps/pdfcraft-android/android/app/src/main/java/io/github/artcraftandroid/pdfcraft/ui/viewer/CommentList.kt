@@ -1,6 +1,7 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -56,9 +58,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.CommentInfo
 import io.github.artcraftandroid.pdfcraft.core.TileRect
 import io.github.artcraftandroid.pdfcraft.engine.toBitmap
+import io.github.artcraftandroid.pdfcraft.plural
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
@@ -78,42 +82,39 @@ internal val LISTED = setOf(
 /** The markups whose row shows a picture of the text they mark. */
 private val SNIPPETS = setOf("Highlight", "Underline", "StrikeOut")
 
-/** What a comment did, in the list's italic line. */
-internal fun commentActionLabel(c: CommentInfo): String = when (c.subtype) {
-    "Highlight" -> "Highlighted"
-    "Underline" -> "Underlined"
-    "StrikeOut" -> "Struck out text"
-    "Ink" -> "Drew freehand"
-    "Line" -> if (c.kind.contains("arrow", ignoreCase = true)) "Drew an arrow" else "Drew a line"
-    "Square" -> "Drew a rectangle"
-    "Circle" -> "Drew an oval"
-    "Polygon" -> if (c.kind.contains("cloud", ignoreCase = true)) "Drew a cloud" else "Drew a polygon"
-    "PolyLine" -> "Drew joined lines"
-    "Stamp" -> "Stamped the page"
-    "Text" -> "Added a note"
-    "FreeText" -> if (c.kind.contains("callout", ignoreCase = true)) "Added a callout" else "Added a text box"
-    "Caret" -> if (c.kind.contains("replace", ignoreCase = true)) "Suggested a replacement" else "Suggested an insertion"
-    "Sound" -> "Recorded a voice note"
-    else -> "Commented"
+/** What a comment did, in the list's italic line (a string resource). */
+@StringRes
+internal fun commentActionLabel(c: CommentInfo): Int = when (c.subtype) {
+    "Highlight" -> R.string.comments_action_highlighted
+    "Underline" -> R.string.comments_action_underlined
+    "StrikeOut" -> R.string.comments_action_struck_out
+    "Ink" -> R.string.comments_action_freehand
+    "Line" -> if (c.kind.contains("arrow", ignoreCase = true)) R.string.comments_action_arrow else R.string.comments_action_line
+    "Square" -> R.string.comments_action_rectangle
+    "Circle" -> R.string.comments_action_oval
+    "Polygon" -> if (c.kind.contains("cloud", ignoreCase = true)) R.string.comments_action_cloud else R.string.comments_action_polygon
+    "PolyLine" -> R.string.comments_action_joined_lines
+    "Stamp" -> R.string.comments_action_stamp
+    "Text" -> R.string.comments_action_note
+    "FreeText" -> if (c.kind.contains("callout", ignoreCase = true)) R.string.comments_action_callout else R.string.comments_action_text_box
+    "Caret" -> if (c.kind.contains("replace", ignoreCase = true)) R.string.comments_action_replacement else R.string.comments_action_insertion
+    "Sound" -> R.string.comments_action_voice
+    else -> R.string.comments_action_other
 }
 
-/** When a comment was made: "Today", "Yesterday", else the date. */
-internal fun commentDateLabel(raw: String?, now: Long = System.currentTimeMillis()): String? {
+/** When a comment was made: [today] ("Today"), [yesterday] ("Yesterday"), else the date. */
+internal fun commentDateLabel(raw: String?, today: String, yesterday: String, now: Long = System.currentTimeMillis()): String? {
     val t = pdfDateMillis(raw) ?: return null
     fun day(ms: Long) = java.util.Calendar.getInstance().apply { timeInMillis = ms }.let { it.get(java.util.Calendar.YEAR) * 400 + it.get(java.util.Calendar.DAY_OF_YEAR) }
     return when (day(t)) {
-        day(now) -> "Today"
-        day(now - 24L * 3600 * 1000) -> "Yesterday"
+        day(now) -> today
+        day(now - 24L * 3600 * 1000) -> yesterday
         else -> java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(t))
     }
 }
 
-/** "N comment threads" (replies aren't threads of their own). */
-internal fun threadsTitle(n: Int): String = when (n) {
-    0 -> "No comments"
-    1 -> "1 comment thread"
-    else -> "$n comment threads"
-}
+/** "N comment threads" (replies aren't threads of their own): [none] for none, else [count] of them. */
+internal fun threadsTitle(n: Int, none: String, count: (Int) -> String): String = if (n == 0) none else count(n)
 
 /**
  * Comment List, full screen as the reference's is on a phone: "N comment threads", the threads
@@ -150,10 +151,10 @@ fun CommentListScreen(vm: AppViewModel, doc: OpenDocument) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) {
-                BarIcon(LucideIcons.ArrowLeft, "Back", ::close, iconSize = 27.dp)
+                BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), ::close, iconSize = 27.dp)
             }
             Text(
-                if (list == null) "Comments" else threadsTitle(threads.size),
+                if (list == null) stringResource(R.string.comments_title) else threadsTitle(threads.size, stringResource(R.string.comments_none)) { plural(R.plurals.comments_threads, it, it) },
                 color = c.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
         }
@@ -178,11 +179,11 @@ fun CommentListScreen(vm: AppViewModel, doc: OpenDocument) {
                             .padding(start = 16.dp, top = if (pageIndex == 0) 12.dp else 15.dp, end = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Page ${page + 1}", color = c.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text(stringResource(R.string.sheet_page, page + 1), color = c.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                         // the chevron's 40 dp target overlaps the rows around it rather than spacing them
                         Box(Modifier.size(width = 40.dp, height = 22.dp), contentAlignment = Alignment.Center) {
                             Icon(
-                                LucideIcons.ChevronUp, if (isFolded) "Expand" else "Collapse", tint = c.icon,
+                                LucideIcons.ChevronUp, stringResource(if (isFolded) R.string.comments_expand else R.string.comments_collapse), tint = c.icon,
                                 modifier = Modifier.size(22.dp).rotate(if (isFolded) 180f else 0f),
                             )
                         }
@@ -222,19 +223,19 @@ fun CommentListScreen(vm: AppViewModel, doc: OpenDocument) {
         PdfSheet(onDismiss = { menuFor = null }, dim = true) {
             val text = cm.contents?.takeIf { it.isNotBlank() }
             if (text != null) {
-                SheetRow(LucideIcons.Copy, "Copy text", {
+                SheetRow(LucideIcons.Copy, stringResource(R.string.comments_copy_text), {
                     menuFor = null
                     vm.copyText(text)
                 })
             }
             if (text != null && !cm.locked) {
-                SheetRow(LucideIcons.Pencil, "Edit comment", {
+                SheetRow(LucideIcons.Pencil, stringResource(R.string.comments_edit), {
                     menuFor = null
                     vm.selectedComment = doc to cm
                 })
             }
             if (!cm.locked) {
-                SheetRow(LucideIcons.Trash2, "Delete", {
+                SheetRow(LucideIcons.Trash2, stringResource(R.string.common_delete), {
                     menuFor = null
                     vm.deleteComment(doc, cm)
                 })
@@ -284,13 +285,13 @@ internal fun CommentRow(
             Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        cm.author?.takeIf { it.isNotBlank() } ?: "Guest", color = c.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        cm.author?.takeIf { it.isNotBlank() } ?: stringResource(R.string.comments_guest), color = c.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 200.dp),
                     )
-                    commentDateLabel(cm.modified)?.let { Text(it, color = c.textTertiary, fontSize = 16.sp) }
+                    commentDateLabel(cm.modified, stringResource(R.string.common_today), stringResource(R.string.common_yesterday))?.let { Text(it, color = c.textTertiary, fontSize = 16.sp) }
                 }
                 Box {
-                    BarIcon(LucideIcons.EllipsisVertical, "Comment options", onMenu, size = 40.dp)
+                    BarIcon(LucideIcons.EllipsisVertical, stringResource(R.string.comments_options), onMenu, size = 40.dp)
                     menu()
                 }
             }
@@ -323,7 +324,7 @@ internal fun CommentRow(
             }
             if (actionLine) {
                 Text(
-                    commentActionLabel(cm), color = c.icon, fontSize = 14.5.sp, fontStyle = FontStyle.Italic,
+                    stringResource(commentActionLabel(cm)), color = c.icon, fontSize = 14.5.sp, fontStyle = FontStyle.Italic,
                     modifier = Modifier.padding(top = if (hasSnippet) 8.dp else 12.dp),
                 )
             }
@@ -334,7 +335,7 @@ internal fun CommentRow(
             Spacer(Modifier.height(if (replyLink) 16.dp else if (lastOnPage) 12.dp else 8.dp))
             if (replyLink) {
                 Text(
-                    "Reply", color = c.toolAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    stringResource(R.string.comments_reply), color = c.toolAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.offset(x = (-8).dp).heightIn(min = 40.dp).clip(RoundedCornerShape(4.dp))
                         .clickable(role = Role.Button, onClick = onReply).padding(horizontal = 8.dp, vertical = 10.dp),
                 )
@@ -348,7 +349,8 @@ internal fun CommentRow(
 /** The guest avatar: a lilac disc, its lower right a shade darker. */
 @Composable
 private fun Avatar(modifier: Modifier) {
-    Canvas(modifier.size(32.dp).semantics { contentDescription = "Avatar" }) {
+    val description = stringResource(R.string.comments_avatar)
+    Canvas(modifier.size(32.dp).semantics { contentDescription = description }) {
         val base = Color(0xFF9B80FF)
         drawCircle(base)
         val shade = Path().apply {
@@ -374,9 +376,9 @@ private fun EmptyComments() {
     ) {
         Icon(LucideIcons.MessagesSquare, null, tint = c.textSecondary, modifier = Modifier.size(64.dp))
         Spacer(Modifier.height(24.dp))
-        Text("Get started", color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.comments_empty_title), color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
-        Text("Comments you add with the commenting tools show up here.", color = c.textSecondary, fontSize = 17.sp, textAlign = TextAlign.Center)
+        Text(stringResource(R.string.comments_empty_body), color = c.textSecondary, fontSize = 17.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(80.dp))
     }
 }

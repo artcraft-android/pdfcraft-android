@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
 import io.github.artcraftandroid.pdfcraft.ui.OpenDocument
@@ -76,17 +78,17 @@ fun PageMenuView(vm: AppViewModel, menu: PageMenu) {
                 .pointerInput(Unit) { detectTapGestures { } },
         ) {
             Row(Modifier.fillMaxWidth().height(61.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                PageMenuIcon(LucideIcons.MessageSquarePlus, "Add comment", annotate) { close(); vm.notePrompt = NotePrompt(doc, menu.at) }
-                PageMenuIcon(LucideIcons.Pencil, "Draw", annotate) { close(); vm.enterTool(doc, ViewerTool.Draw) }
-                PageMenuIcon(LucideIcons.Type, "Add text", annotate) { close(); vm.textPrompt = TextPrompt(doc, menu.at) }
-                if (fill) PageMenuIcon(LucideIcons.Signature, "Sign", true) { close(); vm.enterTool(doc, ViewerTool.FillSign) }
+                PageMenuIcon(LucideIcons.MessageSquarePlus, stringResource(R.string.page_menu_add_comment), annotate) { close(); vm.notePrompt = NotePrompt(doc, menu.at) }
+                PageMenuIcon(LucideIcons.Pencil, stringResource(R.string.common_tool_draw), annotate) { close(); vm.enterTool(doc, ViewerTool.Draw) }
+                PageMenuIcon(LucideIcons.Type, stringResource(R.string.page_menu_add_text), annotate) { close(); vm.textPrompt = TextPrompt(doc, menu.at) }
+                if (fill) PageMenuIcon(LucideIcons.Signature, stringResource(R.string.common_sign), true) { close(); vm.enterTool(doc, ViewerTool.FillSign) }
             }
             Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(1.dp).background(c.divider))
             Spacer(Modifier.height(8.dp))
-            if (!menu.pageHasText) PageMenuRow(LucideIcons.ScanText, "Recognize text") { close(); vm.recognizeText(doc) }
-            PageMenuRow(LucideIcons.Crop, "Crop pages") { close(); vm.openCrop(doc) }
-            PageMenuRow(LucideIcons.FilePenLine, "Edit PDF") { close(); vm.enterTool(doc, ViewerTool.Edit) }
-            PageMenuRow(LucideIcons.ImagePlus, "Add image") { close(); vm.addImageAt(doc, menu.at) }
+            if (!menu.pageHasText) PageMenuRow(LucideIcons.ScanText, stringResource(R.string.common_tool_recognize_text)) { close(); vm.recognizeText(doc) }
+            PageMenuRow(LucideIcons.Crop, stringResource(R.string.common_tool_crop)) { close(); vm.openCrop(doc) }
+            PageMenuRow(LucideIcons.FilePenLine, stringResource(R.string.common_tool_edit_pdf)) { close(); vm.enterTool(doc, ViewerTool.Edit) }
+            PageMenuRow(LucideIcons.ImagePlus, stringResource(R.string.page_menu_add_image)) { close(); vm.addImageAt(doc, menu.at) }
             Spacer(Modifier.height(8.dp))
         }
     }

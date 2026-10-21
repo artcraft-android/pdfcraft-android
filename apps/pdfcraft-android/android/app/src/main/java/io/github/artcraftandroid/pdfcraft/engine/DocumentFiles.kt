@@ -8,6 +8,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
+import io.github.artcraftandroid.pdfcraft.R
 import java.io.File
 import java.security.MessageDigest
 
@@ -31,7 +32,7 @@ class DocumentFiles(private val context: Context) {
     /** The working copy of [uri]: copied in (again) unless it is a file the app already owns. */
     fun workingCopy(uri: Uri): File {
         if (uri.scheme == ContentResolver.SCHEME_FILE) {
-            val f = File(requireNotNull(uri.path) { "The file has no path." })
+            val f = File(requireNotNull(uri.path) { context.getString(R.string.files_error_no_path) })
             if (f.canonicalPath.startsWith(context.filesDir.canonicalPath)) return f
         }
         val name = displayName(uri)
@@ -39,7 +40,7 @@ class DocumentFiles(private val context: Context) {
         val target = File(dir, name)
         val tmp = File(dir, ".$name.part")
         resolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "The file couldn't be read." }
+            requireNotNull(input) { context.getString(R.string.common_file_unreadable) }
             tmp.outputStream().use { input.copyTo(it) }
         }
         if (!tmp.renameTo(target)) {
@@ -108,7 +109,7 @@ class DocumentFiles(private val context: Context) {
 
     /** Write [file] over [uri] (truncating it). */
     fun writeBack(file: File, uri: Uri) {
-        val out = resolver.openOutputStream(uri, "wt") ?: error("The file couldn't be written.")
+        val out = resolver.openOutputStream(uri, "wt") ?: error(context.getString(R.string.files_error_write))
         out.use { o -> file.inputStream().use { it.copyTo(o) } }
     }
 
@@ -160,10 +161,10 @@ class DocumentFiles(private val context: Context) {
             put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val uri = resolver.insert(collection, values) ?: error("The file couldn't be saved to Downloads.")
+        val uri = resolver.insert(collection, values) ?: error(context.getString(R.string.files_error_save_downloads))
         try {
             resolver.openOutputStream(uri).use { out ->
-                requireNotNull(out) { "The file couldn't be saved to Downloads." }
+                requireNotNull(out) { context.getString(R.string.files_error_save_downloads) }
                 file.inputStream().use { it.copyTo(out) }
             }
             resolver.update(uri, android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
@@ -181,9 +182,9 @@ class DocumentFiles(private val context: Context) {
             put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
             put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/PdfCraft")
         }
-        val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("The image couldn't be saved.")
+        val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error(context.getString(R.string.files_error_save_image))
         resolver.openOutputStream(uri).use { out ->
-            requireNotNull(out) { "The image couldn't be saved." }
+            requireNotNull(out) { context.getString(R.string.files_error_save_image) }
             file.inputStream().use { it.copyTo(out) }
         }
         return uri
@@ -191,14 +192,14 @@ class DocumentFiles(private val context: Context) {
 
     /** Where [uri] is, as a person would say it: a folder path, or the app that provided it. */
     fun displayLocation(uri: Uri): String = when (uri.scheme) {
-        ContentResolver.SCHEME_FILE -> uri.path?.substringBeforeLast('/')?.replace("/storage/emulated/0", "Internal storage") ?: "This device"
+        ContentResolver.SCHEME_FILE -> uri.path?.substringBeforeLast('/')?.replace("/storage/emulated/0", context.getString(R.string.files_location_internal_storage)) ?: context.getString(R.string.files_location_this_device)
         else -> {
             val auth = uri.authority.orEmpty()
             when {
-                auth.contains("downloads") -> "Downloads"
-                auth.contains("externalstorage") -> "Internal storage" + (Uri.decode(uri.lastPathSegment ?: "").substringAfter(':', "").substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "/$it" })
-                auth.contains("media") -> "Media"
-                else -> context.packageManager.resolveContentProvider(auth, 0)?.loadLabel(context.packageManager)?.toString() ?: "Another app"
+                auth.contains("downloads") -> context.getString(R.string.files_location_downloads)
+                auth.contains("externalstorage") -> context.getString(R.string.files_location_internal_storage) + (Uri.decode(uri.lastPathSegment ?: "").substringAfter(':', "").substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "/$it" })
+                auth.contains("media") -> context.getString(R.string.files_location_media)
+                else -> context.packageManager.resolveContentProvider(auth, 0)?.loadLabel(context.packageManager)?.toString() ?: context.getString(R.string.files_location_another_app)
             }
         }
     }

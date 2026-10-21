@@ -68,6 +68,8 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +80,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.annotation.StringRes
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.engine.toBitmap
 import io.github.artcraftandroid.pdfcraft.ui.viewer.formatSize
 import kotlin.math.roundToInt
@@ -108,7 +112,7 @@ fun ToolScaffold(
             ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, "Back", onBack, iconSize = 27.dp) }
+            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), onBack, iconSize = 27.dp) }
             Spacer(Modifier.width(16.dp))
             Text(title, color = c.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             trailing?.invoke()
@@ -172,7 +176,7 @@ fun ToolPage(
     // the keyboard covers the pill rather than lifting it, as the reference's does
     Column(Modifier.fillMaxSize().background(c.surface).safeTopPadding().background(c.navBand).navigationBarsPadding().background(c.surface)) {
         Row(Modifier.fillMaxWidth().height(io.github.artcraftandroid.pdfcraft.ui.viewer.TopBarHeight), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, "Back", onBack, iconSize = 27.dp) }
+            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), onBack, iconSize = 27.dp) }
             Spacer(Modifier.weight(1f))
             trailing?.invoke()
             Spacer(Modifier.width(8.dp))
@@ -248,13 +252,13 @@ fun CompressScreen(vm: AppViewModel, doc: OpenDocument) {
     val c = pdfColors
     var level by remember { mutableStateOf(1) }
     val levels = listOf(
-        "High compression" to "Smallest file, images softer",
-        "Medium compression" to "Balanced file size and quality",
-        "Low compression" to "Bigger file, images sharpest",
+        stringResource(R.string.tools_compress_high) to stringResource(R.string.tools_compress_high_desc),
+        stringResource(R.string.tools_compress_medium) to stringResource(R.string.tools_compress_medium_desc),
+        stringResource(R.string.tools_compress_low) to stringResource(R.string.tools_compress_low_desc),
     )
-    ToolPage("Compress PDF", { vm.toolScreen = null }, "Compress", true, { vm.compress(doc, level) }) {
+    ToolPage(stringResource(R.string.common_tool_compress), { vm.toolScreen = null }, stringResource(R.string.tools_compress_action), true, { vm.compress(doc, level) }) {
         OutlinedFileCard(vm, doc)
-        Text("Compression level:", color = c.label, fontSize = 15.sp, modifier = Modifier.padding(start = 24.dp, top = 28.dp, bottom = 4.dp))
+        Text(stringResource(R.string.tools_compression_level), color = c.label, fontSize = 15.sp, modifier = Modifier.padding(start = 24.dp, top = 28.dp, bottom = 4.dp))
         levels.forEachIndexed { i, (name, desc) -> ToolChoice(level == i, name, desc) { level = i } }
     }
 }
@@ -279,7 +283,7 @@ private fun PasswordField(label: String, value: String, onValue: (String) -> Uni
             modifier = Modifier.weight(1f).then(if (focus != null) Modifier.focusRequester(focus) else Modifier)
                 .onFocusChanged { focused = it.isFocused }.semantics { contentDescription = label },
         )
-        BarIcon(if (visible) LucideIcons.Eye else LucideIcons.EyeOff, if (visible) "Hide password" else "Show password", { onToggle?.invoke() }, size = 44.dp)
+        BarIcon(if (visible) LucideIcons.Eye else LucideIcons.EyeOff, stringResource(if (visible) R.string.ui_hide_password else R.string.ui_show_password), { onToggle?.invoke() }, size = 44.dp)
     }
 }
 
@@ -295,19 +299,19 @@ fun ProtectScreen(vm: AppViewModel, doc: OpenDocument) {
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val bad = pw.isNotEmpty() && (pw.length !in 6..128 || pw.any { it < '!' || it > '~' })
     val mismatch = confirm.isNotEmpty() && confirm != pw
-    ToolPage("Set password", { vm.toolScreen = null }, "Set password", pw.isNotEmpty() && confirm.isNotEmpty() && !bad && !mismatch, { vm.protect(doc, pw) },
-        trailing = { BarIcon(LucideIcons.Info, "About passwords", { info = true }) }) {
+    ToolPage(stringResource(R.string.common_tool_set_password), { vm.toolScreen = null }, stringResource(R.string.common_tool_set_password), pw.isNotEmpty() && confirm.isNotEmpty() && !bad && !mismatch, { vm.protect(doc, pw) },
+        trailing = { BarIcon(LucideIcons.Info, stringResource(R.string.tools_about_passwords), { info = true }) }) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text("A protected copy of this file is saved.", color = c.label, fontSize = 16.sp, modifier = Modifier.padding(horizontal = 24.dp))
-            PasswordField("New password *", pw, { pw = it }, visible, { visible = !visible }, bad, focus)
-            if (bad) Text("Use 6 to 128 characters: letters, numbers and symbols, no spaces.", color = c.red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
-            PasswordField("Repeat the password *", confirm, { confirm = it }, visible, { visible = !visible }, mismatch)
-            if (mismatch) Text("The passwords don't match.", color = c.red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+            Text(stringResource(R.string.tools_protect_intro), color = c.label, fontSize = 16.sp, modifier = Modifier.padding(horizontal = 24.dp))
+            PasswordField(stringResource(R.string.tools_new_password), pw, { pw = it }, visible, { visible = !visible }, bad, focus)
+            if (bad) Text(stringResource(R.string.tools_password_rule), color = c.red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+            PasswordField(stringResource(R.string.tools_repeat_password), confirm, { confirm = it }, visible, { visible = !visible }, mismatch)
+            if (mismatch) Text(stringResource(R.string.tools_password_mismatch), color = c.red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
         }
     }
     if (info) {
-        PdfDialog(onDismiss = { info = false }, title = "About passwords", confirm = "OK", onConfirm = { info = false }, dismiss = null) {
-            Text("The copy is encrypted with AES-256. Keep the password safe: it can't be recovered. To remove the password later, open the copy with it and choose Remove password.", color = c.text, fontSize = 14.sp)
+        PdfDialog(onDismiss = { info = false }, title = stringResource(R.string.tools_about_passwords), confirm = stringResource(R.string.common_ok), onConfirm = { info = false }, dismiss = null) {
+            Text(stringResource(R.string.tools_about_passwords_body), color = c.text, fontSize = 14.sp)
         }
     }
 }
@@ -320,11 +324,14 @@ fun ExportScreen(vm: AppViewModel, doc: OpenDocument) {
     // the image format used last time comes first chosen
     var format by remember(tab) { mutableStateOf(if (tab == 1 && vm.lastImageFormat == "png") 1 else 0) }
     val formats = if (tab == 0) {
-        listOf("Word (docx)" to "docx", "Rich Text Format (rtf)" to "rtf", "Excel (xlsx)" to "xlsx", "PowerPoint (pptx)" to "pptx")
+        listOf(
+            stringResource(R.string.tools_format_word) to "docx", stringResource(R.string.tools_format_rtf) to "rtf",
+            stringResource(R.string.tools_format_excel) to "xlsx", stringResource(R.string.tools_format_powerpoint) to "pptx",
+        )
     } else {
-        listOf("JPEG (jpeg)" to "jpg", "PNG (png)" to "png")
+        listOf(stringResource(R.string.tools_format_jpeg) to "jpg", stringResource(R.string.tools_format_png) to "png")
     }
-    ToolPage("Export PDF", { vm.toolScreen = null }, "Export", true, {
+    ToolPage(stringResource(R.string.common_tool_export), { vm.toolScreen = null }, stringResource(R.string.tools_export_action), true, {
         val ext = formats[format].second
         if (tab == 0) vm.exportDocument(doc, ext) else vm.exportImages(doc, ext)
     }) {
@@ -332,9 +339,9 @@ fun ExportScreen(vm: AppViewModel, doc: OpenDocument) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
             Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(1.dp).background(c.divider))
             Row {
-                listOf("Document", "Image").forEachIndexed { i, label ->
+                listOf(R.string.tools_export_document, R.string.tools_export_image).forEachIndexed { i, label ->
                     Column(Modifier.clickable { tab = i }.padding(horizontal = 8.dp).width(androidx.compose.foundation.layout.IntrinsicSize.Max)) {
-                        Text(label, color = if (tab == i) c.label else c.text, fontSize = 16.sp, modifier = Modifier.padding(vertical = 12.dp))
+                        Text(stringResource(label), color = if (tab == i) c.label else c.text, fontSize = 16.sp, modifier = Modifier.padding(vertical = 12.dp))
                         Box(Modifier.fillMaxWidth().height(2.dp).background(if (tab == i) c.label else Color.Transparent))
                     }
                     if (i == 0) Spacer(Modifier.width(14.dp))
@@ -343,7 +350,7 @@ fun ExportScreen(vm: AppViewModel, doc: OpenDocument) {
         }
         Spacer(Modifier.height(12.dp))
         if (tab == 0 && doc.info.encrypted && !doc.info.allowsCopying) {
-            Text("This document's security settings don't allow exporting its text. Export images of its pages instead.", color = c.red, fontSize = 14.sp, modifier = Modifier.padding(20.dp))
+            Text(stringResource(R.string.tools_export_not_allowed), color = c.red, fontSize = 14.sp, modifier = Modifier.padding(20.dp))
         }
         formats.forEachIndexed { i, (label, _) -> ToolChoice(format == i, label, null) { format = i } }
     }
@@ -360,16 +367,16 @@ fun CreateSourcesScreen(vm: AppViewModel) {
     BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().background(c.surface).safeTopPadding().background(c.navBand).navigationBarsPadding().background(c.surface)) {
         Row(Modifier.fillMaxWidth().height(io.github.artcraftandroid.pdfcraft.ui.viewer.TopBarHeight), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, "Back", back, iconSize = 27.dp) }
+            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), back, iconSize = 27.dp) }
             Spacer(Modifier.width(4.dp))
-            Text("Choose files to make a PDF", color = c.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.tools_create_title), color = c.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(8.dp))
-        SourceRow(LucideIcons.Images, "Photos") { vm.toolScreen = null; vm.pickPhotosToPdf() }
-        SourceRow(LucideIcons.FolderOpen, "Browse files") { vm.toolScreen = null; vm.pickFiles(FilePickKind.Create) }
-        Text("Or make a new one", color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 6.dp))
+        SourceRow(LucideIcons.Images, stringResource(R.string.home_photos)) { vm.toolScreen = null; vm.pickPhotosToPdf() }
+        SourceRow(LucideIcons.FolderOpen, stringResource(R.string.tools_browse_files)) { vm.toolScreen = null; vm.pickFiles(FilePickKind.Create) }
+        Text(stringResource(R.string.tools_or_make_new), color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 6.dp))
         Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(1.dp).background(c.divider))
-        SourceRow(LucideIcons.Camera, "Scan a document") { vm.toolScreen = null; vm.startScan() }
+        SourceRow(LucideIcons.Camera, stringResource(R.string.tools_scan_document)) { vm.toolScreen = null; vm.startScan() }
     }
 }
 
@@ -415,6 +422,8 @@ fun CombineScreen(vm: AppViewModel) {
     val rowPx = with(LocalDensity.current) { 58.dp.toPx() }
     val ok = files.size in 2..12
     val back = { vm.toolScreen = null; vm.combineFiles.clear() }
+    val dragLabel = stringResource(R.string.tools_drag_to_reorder)
+    val removedMessage = stringResource(R.string.tools_file_removed)
     BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().background(c.surface).safeTopPadding().background(c.navBand).navigationBarsPadding().background(c.surface)) {
         Row(
@@ -422,19 +431,19 @@ fun CombineScreen(vm: AppViewModel) {
                 .drawBehind { drawRect(c.divider, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, "Back", back, iconSize = 27.dp) }
+            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), back, iconSize = 27.dp) }
             Spacer(Modifier.width(4.dp))
             Text(
-                if (files.size > 1) "${files.size} files" else "Combine files",
+                if (files.size > 1) pluralStringResource(R.plurals.tools_file_count, files.size, files.size) else stringResource(R.string.common_tool_combine),
                 color = c.label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
             )
             Box(
                 Modifier.padding(end = 20.dp).height(36.dp).clip(RoundedCornerShape(18.dp)).border(2.dp, c.label, RoundedCornerShape(18.dp))
                     .clickable { vm.pickFiles(FilePickKind.Combine) }.padding(horizontal = 16.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Add files", color = c.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+            ) { Text(stringResource(R.string.tools_add_files), color = c.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
         }
-        if (files.size > 12) Text("Remove some files: up to 12 can be combined.", color = c.red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        if (files.size > 12) Text(stringResource(R.string.tools_combine_too_many), color = c.red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp)) {
             itemsIndexed(files, key = { _, f -> f.uri.toString() }) { i, f ->
                 Row(
@@ -462,14 +471,14 @@ fun CombineScreen(vm: AppViewModel) {
                                     dragOffset -= (to - from) * rowPx
                                 }
                             }
-                        }.semantics { contentDescription = "Drag to reorder" },
+                        }.semantics { contentDescription = dragLabel },
                         contentAlignment = Alignment.Center,
                     ) { Icon(LucideIcons.GripVertical, null, tint = c.icon, modifier = Modifier.size(20.dp)) }
                     Column(Modifier.weight(1f)) {
                         Text(f.name.substringBeforeLast('.'), color = c.label, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(listOfNotNull(f.name.substringAfterLast('.', "").uppercase(), f.size?.let { formatSize(it) }).joinToString(" • "), color = c.text, fontSize = 14.sp)
                     }
-                    BarIcon(LucideIcons.CircleMinus, "Remove ${f.name}", { files.remove(f); vm.tell("File removed") })
+                    BarIcon(LucideIcons.CircleMinus, stringResource(R.string.tools_remove_file, f.name), { files.remove(f); vm.tell(removedMessage) })
                 }
             }
         }
@@ -477,15 +486,15 @@ fun CombineScreen(vm: AppViewModel) {
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp).height(42.dp).clip(RoundedCornerShape(21.dp))
                 .background(if (ok) c.button else c.pressed).clickable(enabled = ok) { naming = true },
             contentAlignment = Alignment.Center,
-        ) { Text("Combine as PDF", color = if (ok) Color.White else c.textSecondary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
+        ) { Text(stringResource(R.string.tools_combine_as_pdf), color = if (ok) Color.White else c.textSecondary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
         if (naming) {
             var name by remember { mutableStateOf("Combine " + java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG).format(java.util.Date())) }
             val focus = remember { androidx.compose.ui.focus.FocusRequester() }
             PdfDialog(
-                onDismiss = { naming = false }, title = "Name the combined file", confirm = "Save",
+                onDismiss = { naming = false }, title = stringResource(R.string.tools_combine_name_title), confirm = stringResource(R.string.common_save),
                 onConfirm = { naming = false; vm.combine(name.trim().ifEmpty { "Combine" }) },
                 confirmEnabled = name.isNotBlank(),
-            ) { PdfField(name, { name = it }, "File name", focus = focus) }
+            ) { PdfField(name, { name = it }, stringResource(R.string.common_file_name), focus = focus) }
         }
     }
 }
@@ -519,11 +528,11 @@ fun CropScreen(vm: AppViewModel, doc: OpenDocument) {
         bitmap = runCatching { withContext(eng.thumbnails) { eng.session.renderPage(doc.id, page.toUInt(), scale, null).toBitmap().asImageBitmap() } }.getOrNull()
     }
     val changed = !(rect[0] == 0f && rect[1] == 0f && rect[2] == 1f && rect[3] == 1f)
-    ToolScaffold(if (allPages) "All pages" else "Current page", { vm.toolScreen = null }, null, false, {},
+    ToolScaffold(stringResource(if (allPages) R.string.tools_all_pages else R.string.tools_current_page), { vm.toolScreen = null }, null, false, {},
         viewerBands = true,
         trailing = {
             Text(
-                "Save", color = if (changed) c.label else c.textSecondary.copy(alpha = 0.5f), fontSize = 17.sp,
+                stringResource(R.string.common_save), color = if (changed) c.label else c.textSecondary.copy(alpha = 0.5f), fontSize = 17.sp,
                 modifier = Modifier.clickable(enabled = changed) {
                     val info = p ?: return@clickable
                     vm.crop(doc, if (allPages) null else page, floatArrayOf(rect[0] * info.width, rect[1] * info.height, rect[2] * info.width, rect[3] * info.height))
@@ -626,19 +635,19 @@ fun CropScreen(vm: AppViewModel, doc: OpenDocument) {
         }
         // the page in a grey pill (with arrows to step through the pages when cropping them all)
         Row(Modifier.fillMaxWidth().background(c.desk).height(88.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            if (allPages) BarIcon(LucideIcons.ChevronLeft, "Previous page", { page = (page - 1).coerceAtLeast(0) }, enabled = page > 0)
+            if (allPages) BarIcon(LucideIcons.ChevronLeft, stringResource(R.string.tools_previous_page), { page = (page - 1).coerceAtLeast(0) }, enabled = page > 0)
             Box(
                 Modifier.widthIn(min = 102.dp).height(32.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFFD1D1D1)).padding(horizontal = 16.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Page ${page + 1}", color = Color(0xFF2C2C2C), fontSize = 15.sp) }
-            if (allPages) BarIcon(LucideIcons.ChevronRight, "Next page", { page = (page + 1).coerceAtMost(doc.pageCount - 1) }, enabled = page < doc.pageCount - 1)
+            ) { Text(stringResource(R.string.tools_page_number, page + 1), color = Color(0xFF2C2C2C), fontSize = 15.sp) }
+            if (allPages) BarIcon(LucideIcons.ChevronRight, stringResource(R.string.tools_next_page), { page = (page + 1).coerceAtMost(doc.pageCount - 1) }, enabled = page < doc.pageCount - 1)
         }
         Row(Modifier.fillMaxWidth().height(54.dp).background(c.surface).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             PdfSwitch(allPages, { allPages = it })
             Spacer(Modifier.width(16.dp))
-            Text("All pages", color = c.label, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.tools_all_pages), color = c.label, fontSize = 16.sp, modifier = Modifier.weight(1f))
             Text(
-                "Reset", color = if (changed) c.label else c.textSecondary.copy(alpha = 0.5f), fontSize = 16.sp,
+                stringResource(R.string.tools_reset), color = if (changed) c.label else c.textSecondary.copy(alpha = 0.5f), fontSize = 16.sp,
                 modifier = Modifier.clickable(enabled = changed) { rect = floatArrayOf(0f, 0f, 1f, 1f) }.padding(horizontal = 12.dp, vertical = 12.dp),
             )
         }
@@ -658,12 +667,12 @@ data class ScanPage(val file: java.io.File, val thumb: ImageBitmap, val corners:
 }
 
 /** The looks a scan can have, and how the engine's camera clean-up gives each. */
-enum class ScanFilter(val label: String, val mode: String, val level: Int) {
-    Original("Original", "original", 0),
-    AutoColor("Auto colour", "colour", 50),
-    Grayscale("Grayscale", "greyscale", 40),
-    Whiteboard("Whiteboard", "colour", 85),
-    LightText("Light text", "bw", 60),
+enum class ScanFilter(@StringRes val label: Int, val mode: String, val level: Int) {
+    Original(R.string.tools_filter_original, "original", 0),
+    AutoColor(R.string.tools_filter_auto_colour, "colour", 50),
+    Grayscale(R.string.tools_filter_grayscale, "greyscale", 40),
+    Whiteboard(R.string.tools_filter_whiteboard, "colour", 85),
+    LightText(R.string.tools_filter_light_text, "bw", 60),
 }
 
 /** Scan: pages taken with the camera, reviewed (name, retake, crop, delete, look), then saved as a PDF. */
@@ -687,15 +696,17 @@ fun ScanScreen(vm: AppViewModel) {
         ScanCrop(pages[croppingAt], onDone = { pages[croppingAt] = pages[croppingAt].copy(corners = it); cropping = null }, onCancel = { cropping = null })
         return
     }
+    val addPageLabel = stringResource(R.string.tools_add_page)
     ToolScaffold(
-        if (pages.isEmpty()) "Scan" else "Page ${current.coerceAtMost(pages.lastIndex) + 1} of ${pages.size}",
+        if (pages.isEmpty()) stringResource(R.string.common_tool_scan) else stringResource(R.string.tools_page_of, current.coerceAtMost(pages.lastIndex) + 1, pages.size),
         { vm.discardScan() },
-        "Save PDF", pages.isNotEmpty(), { vm.saveScan(filter) },
+        stringResource(R.string.tools_save_pdf), pages.isNotEmpty(), { vm.saveScan(filter) },
     ) {
         // the new file's name, changeable before it's saved (not when the pages go into an open document)
         if (vm.insertScanAt == null && vm.scanName.isNotBlank()) {
+            val nameLabel = stringResource(R.string.tools_scan_name_description, vm.scanName)
             Row(
-                Modifier.fillMaxWidth().clickable { naming = true }.padding(horizontal = 16.dp, vertical = 10.dp).semantics { contentDescription = "File name: ${vm.scanName}. Change" },
+                Modifier.fillMaxWidth().clickable { naming = true }.padding(horizontal = 16.dp, vertical = 10.dp).semantics { contentDescription = nameLabel },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(LucideIcons.FileText, null, tint = c.icon, modifier = Modifier.size(20.dp))
@@ -710,38 +721,38 @@ fun ScanScreen(vm: AppViewModel) {
             if (page != null) {
                 ScanPhoto(page.thumb, page.corners, Modifier.fillMaxSize())
             } else {
-                Text("Take a photo of each page", color = c.textSecondary)
+                Text(stringResource(R.string.tools_scan_empty), color = c.textSecondary)
             }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             pages.forEachIndexed { i, p ->
-                Image(p.thumb, "Page ${i + 1}", modifier = Modifier.size(56.dp, 72.dp).clip(RoundedCornerShape(4.dp)).border(2.dp, if (i == current) c.accent else Color.Transparent, RoundedCornerShape(4.dp)).clickable { current = i }, contentScale = ContentScale.Crop)
+                Image(p.thumb, stringResource(R.string.tools_page_number, i + 1), modifier = Modifier.size(56.dp, 72.dp).clip(RoundedCornerShape(4.dp)).border(2.dp, if (i == current) c.accent else Color.Transparent, RoundedCornerShape(4.dp)).clickable { current = i }, contentScale = ContentScale.Crop)
             }
-            Box(Modifier.size(56.dp, 72.dp).clip(RoundedCornerShape(4.dp)).background(c.surfaceRaised).clickable { vm.takeScanPhoto() }.semantics { contentDescription = "Add page" }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(56.dp, 72.dp).clip(RoundedCornerShape(4.dp)).background(c.surfaceRaised).clickable { vm.takeScanPhoto() }.semantics { contentDescription = addPageLabel }, contentAlignment = Alignment.Center) {
                 Icon(LucideIcons.Plus, null, tint = c.icon)
             }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ScanFilter.entries.forEach { f ->
                 Text(
-                    f.label, color = if (f == filter) c.accent else c.text, fontSize = 14.sp,
+                    stringResource(f.label), color = if (f == filter) c.accent else c.text, fontSize = 14.sp,
                     modifier = Modifier.clip(CircleShape).background(if (f == filter) c.pressed else Color.Transparent).clickable { filter = f }.padding(horizontal = 14.dp, vertical = 8.dp),
                 )
             }
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            TextButton(onClick = { vm.retakeScan(current) }, enabled = pages.isNotEmpty()) { Text("Retake", color = c.accent) }
-            TextButton(onClick = { cropping = pages.getOrNull(current.coerceAtMost(pages.lastIndex))?.file }, enabled = pages.isNotEmpty()) { Text("Crop", color = c.accent) }
-            TextButton(onClick = { if (pages.isNotEmpty()) { pages.removeAt(current.coerceAtMost(pages.lastIndex)); current = (current - 1).coerceAtLeast(0) } }, enabled = pages.isNotEmpty()) { Text("Delete", color = c.accent) }
+            TextButton(onClick = { vm.retakeScan(current) }, enabled = pages.isNotEmpty()) { Text(stringResource(R.string.tools_retake), color = c.accent) }
+            TextButton(onClick = { cropping = pages.getOrNull(current.coerceAtMost(pages.lastIndex))?.file }, enabled = pages.isNotEmpty()) { Text(stringResource(R.string.tools_crop), color = c.accent) }
+            TextButton(onClick = { if (pages.isNotEmpty()) { pages.removeAt(current.coerceAtMost(pages.lastIndex)); current = (current - 1).coerceAtLeast(0) } }, enabled = pages.isNotEmpty()) { Text(stringResource(R.string.common_delete), color = c.accent) }
         }
     }
     if (naming) {
         var name by remember { mutableStateOf(vm.scanName) }
         PdfDialog(
-            onDismiss = { naming = false }, title = "File name",
-            confirm = "OK", confirmEnabled = name.isNotBlank(), onConfirm = { vm.scanName = name.trim(); naming = false },
+            onDismiss = { naming = false }, title = stringResource(R.string.common_file_name),
+            confirm = stringResource(R.string.common_ok), confirmEnabled = name.isNotBlank(), onConfirm = { vm.scanName = name.trim(); naming = false },
         ) {
-            PdfField(name, { name = it }, "File name")
+            PdfField(name, { name = it }, stringResource(R.string.common_file_name))
         }
     }
 }
@@ -754,13 +765,13 @@ fun ScanScreen(vm: AppViewModel) {
 private fun ScanCrop(page: ScanPage, onDone: (FloatArray) -> Unit, onCancel: () -> Unit) {
     val c = pdfColors
     var corners by remember(page.file) { mutableStateOf(page.corners) }
-    ToolScaffold("Crop", onCancel, "Done", true, { onDone(corners) }) {
+    ToolScaffold(stringResource(R.string.tools_crop), onCancel, stringResource(R.string.common_done), true, { onDone(corners) }) {
         Box(Modifier.weight(1f).fillMaxWidth().background(c.desk)) {
             ScanPhoto(page.thumb, corners, Modifier.fillMaxSize(), onMove = { corners = it })
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            TextButton(onClick = { page.found?.let { corners = it } }, enabled = page.found != null) { Text("Auto-detect", color = if (page.found != null) c.accent else c.textSecondary) }
-            TextButton(onClick = { corners = ScanPage.WHOLE }) { Text("No crop", color = c.accent) }
+            TextButton(onClick = { page.found?.let { corners = it } }, enabled = page.found != null) { Text(stringResource(R.string.tools_auto_detect), color = if (page.found != null) c.accent else c.textSecondary) }
+            TextButton(onClick = { corners = ScanPage.WHOLE }) { Text(stringResource(R.string.tools_no_crop), color = c.accent) }
         }
     }
 }

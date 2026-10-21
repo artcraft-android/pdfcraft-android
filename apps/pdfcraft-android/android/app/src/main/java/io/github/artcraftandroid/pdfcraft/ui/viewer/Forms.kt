@@ -47,6 +47,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.WidgetInfo
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
@@ -176,12 +178,12 @@ fun FieldTopBar(actions: FieldActions) {
         },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Reset", color = c.label, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+        Text(stringResource(R.string.forms_reset), color = c.label, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
             modifier = Modifier.clickable { actions.reset() }.padding(horizontal = 28.dp, vertical = 14.dp))
         Spacer(Modifier.weight(1f))
-        BarIcon(LucideIcons.ChevronLeft, "Previous field", { actions.step(false) }, enabled = actions.canBack)
+        BarIcon(LucideIcons.ChevronLeft, stringResource(R.string.forms_previous_field), { actions.step(false) }, enabled = actions.canBack)
         Spacer(Modifier.width(4.dp))
-        BarIcon(LucideIcons.ChevronRight, "Next field", { actions.step(true) }, enabled = actions.canForward)
+        BarIcon(LucideIcons.ChevronRight, stringResource(R.string.forms_next_field), { actions.step(true) }, enabled = actions.canForward)
         Spacer(Modifier.width(16.dp))
     }
 }

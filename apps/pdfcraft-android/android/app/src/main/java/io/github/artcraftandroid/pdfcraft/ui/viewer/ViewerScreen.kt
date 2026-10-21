@@ -58,9 +58,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import io.github.artcraftandroid.pdfcraft.R
+import io.github.artcraftandroid.pdfcraft.text
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.HintToast
 import io.github.artcraftandroid.pdfcraft.ui.OpenDocument
@@ -336,9 +339,9 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                         onShare = { vm.share(doc) },
                         onMore = { ctl.sheet = if (ctl.sheet == ViewerSheet.More) ViewerSheet.None else ViewerSheet.More },
                         moreOpen = ctl.sheet == ViewerSheet.More,
-                        title = if (ctl.tool == ViewerTool.Edit) "Edit PDF" else null,
-                        undoLabel = if (doc.localUndo != null) "Drawing" else doc.info.undo,
-                        redoLabel = if (doc.localUndo != null) "Drawing" else doc.info.redo,
+                        title = if (ctl.tool == ViewerTool.Edit) stringResource(R.string.common_tool_edit_pdf) else null,
+                        undoLabel = if (doc.localUndo != null) stringResource(R.string.viewer_undo_drawing) else doc.info.undo,
+                        redoLabel = if (doc.localUndo != null) stringResource(R.string.viewer_undo_drawing) else doc.info.redo,
                     )
                 }
             }
@@ -360,10 +363,10 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                             onMoreTools = { ctl.sheet = if (ctl.sheet == ViewerSheet.MoreTools) ViewerSheet.None else ViewerSheet.MoreTools },
                             moreToolsOpen = ctl.sheet == ViewerSheet.MoreTools,
                             chips = listOf(
-                                QuickChip(if (vm.isStarred(doc)) "Unstar this file" else "Star this file", LucideIcons.Star, ToolHues.combine) { vm.toggleStar(doc) },
-                                QuickChip("Read aloud", LucideIcons.Headphones, ToolHues.read) { vm.startReadAloud(doc) },
-                                QuickChip("Create PDF", QuickTool.Create.icon, ToolHues.create) { vm.runQuickTool(doc, QuickTool.Create) },
-                                QuickChip("Organize pages", QuickTool.Organize.icon, ToolHues.organize) { vm.runQuickTool(doc, QuickTool.Organize) },
+                                QuickChip(stringResource(if (vm.isStarred(doc)) R.string.viewer_unstar_file else R.string.viewer_star_file), LucideIcons.Star, ToolHues.combine) { vm.toggleStar(doc) },
+                                QuickChip(stringResource(R.string.common_tool_read_aloud), LucideIcons.Headphones, ToolHues.read) { vm.startReadAloud(doc) },
+                                QuickChip(stringResource(R.string.common_tool_create_pdf), QuickTool.Create.icon, ToolHues.create) { vm.runQuickTool(doc, QuickTool.Create) },
+                                QuickChip(stringResource(R.string.common_tool_organize), QuickTool.Organize.icon, ToolHues.organize) { vm.runQuickTool(doc, QuickTool.Organize) },
                             ),
                             onExtraHeight = { quickExtraPx = it },
                         )
@@ -403,9 +406,9 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
         vm.pageMenu?.takeIf { it.doc === doc }?.let { PageMenuView(vm, it) }
         if (vm.imageSource?.first === doc) {
             io.github.artcraftandroid.pdfcraft.ui.PdfSheet(onDismiss = { vm.imageSource = null }, dim = true) {
-                io.github.artcraftandroid.pdfcraft.ui.SheetTitle("Add image")
-                io.github.artcraftandroid.pdfcraft.ui.SheetRow(LucideIcons.Images, "From photos", { vm.addImageFrom(camera = false) })
-                io.github.artcraftandroid.pdfcraft.ui.SheetRow(LucideIcons.Camera, "From camera", { vm.addImageFrom(camera = true) })
+                io.github.artcraftandroid.pdfcraft.ui.SheetTitle(stringResource(R.string.viewer_add_image))
+                io.github.artcraftandroid.pdfcraft.ui.SheetRow(LucideIcons.Images, stringResource(R.string.viewer_image_from_photos), { vm.addImageFrom(camera = false) })
+                io.github.artcraftandroid.pdfcraft.ui.SheetRow(LucideIcons.Camera, stringResource(R.string.viewer_image_from_camera), { vm.addImageFrom(camera = true) })
                 Spacer(Modifier.height(12.dp))
             }
         }
@@ -438,14 +441,14 @@ fun edgeTap(x: Float, width: Float): Int {
 
 private fun toolHint(tool: ViewerTool, markup: TextMarkup, doc: OpenDocument): String? = when (tool) {
     ViewerTool.Markup -> when (markup) {
-        TextMarkup.Highlight -> "Drag across the text to highlight it"
-        TextMarkup.Underline -> "Drag across the text to underline it"
-        TextMarkup.Strikethrough -> "Drag across the text to strike it through"
+        TextMarkup.Highlight -> text(R.string.viewer_hint_highlight)
+        TextMarkup.Underline -> text(R.string.viewer_hint_underline)
+        TextMarkup.Strikethrough -> text(R.string.viewer_hint_strikethrough)
     }
-    ViewerTool.Draw -> "Draw with one finger, scroll with two"
-    ViewerTool.Comment -> "Tap where the comment goes"
-    ViewerTool.Text -> "Tap to add text"
-    ViewerTool.FillSign -> if (doc.info.fields > 0u) null else "Tap where you want to fill in text"
+    ViewerTool.Draw -> text(R.string.viewer_hint_draw)
+    ViewerTool.Comment -> text(R.string.viewer_hint_comment)
+    ViewerTool.Text -> text(R.string.viewer_hint_text)
+    ViewerTool.FillSign -> if (doc.info.fields > 0u) null else text(R.string.viewer_hint_fill_sign)
     else -> null
 }
 
@@ -614,11 +617,11 @@ private fun SuccessBannerView(b: io.github.artcraftandroid.pdfcraft.ui.SuccessBa
             Icon(LucideIcons.CircleCheck, null, tint = Color.White, modifier = Modifier.padding(top = 2.dp).size(22.dp))
             Spacer(Modifier.width(14.dp))
             Text(b.text, color = Color.White, fontSize = 17.sp, lineHeight = 22.sp, modifier = Modifier.weight(1f))
-            BarIcon(LucideIcons.X, "Close", onClose, tint = Color.White, size = 40.dp)
+            BarIcon(LucideIcons.X, stringResource(R.string.viewer_close), onClose, tint = Color.White, size = 40.dp)
         }
         b.undo?.let { undo ->
             Text(
-                "Undo", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                stringResource(R.string.common_undo), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.align(Alignment.End).clickable { onClose(); undo() }.padding(horizontal = 24.dp, vertical = 12.dp),
             )
         }

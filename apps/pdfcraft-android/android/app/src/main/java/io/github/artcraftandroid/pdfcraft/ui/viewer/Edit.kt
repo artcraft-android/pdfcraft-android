@@ -71,6 +71,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
 import io.github.artcraftandroid.pdfcraft.ui.OpenDocument
@@ -101,8 +103,9 @@ private val SelectionBlue = Color(0xFF448AFF)
 
 /** The text colours Edit PDF offers, in the reference's order. */
 private val EditColors = listOf(
-    "#ff0000" to "Red", "#ffff00" to "Yellow", "#0000ff" to "Blue", "#00ff00" to "Light green", "#9900ff" to "Purple",
-    "#00ffff" to "Cyan", "#009900" to "Green", "#ffffff" to "White", "#000000" to "Black",
+    "#ff0000" to R.string.prefs_color_red, "#ffff00" to R.string.prefs_color_yellow, "#0000ff" to R.string.prefs_color_blue,
+    "#00ff00" to R.string.prefs_color_light_green, "#9900ff" to R.string.prefs_color_purple, "#00ffff" to R.string.prefs_color_cyan,
+    "#009900" to R.string.prefs_color_green, "#ffffff" to R.string.prefs_color_white, "#000000" to R.string.prefs_color_black,
 )
 
 /** Which formatting panel is open over the bar. */
@@ -127,19 +130,21 @@ private fun EditToolsBar(vm: AppViewModel, doc: OpenDocument) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        EditBarItem(LucideIcons.LayoutGrid, "Organize pages", false, 96.dp) {
+        val textHint = stringResource(R.string.edit_tap_for_text)
+        val imageHint = stringResource(R.string.edit_tap_for_image)
+        EditBarItem(LucideIcons.LayoutGrid, stringResource(R.string.common_tool_organize), false, 96.dp) {
             vm.organizing = true
             doc.controller.pagesOpen = true
         }
         BarDividerLine()
-        EditBarItem(LucideIcons.Type, "Add text", vm.editMode == EditMode.AddText, 70.dp) {
+        EditBarItem(LucideIcons.Type, stringResource(R.string.edit_add_text), vm.editMode == EditMode.AddText, 70.dp) {
             vm.editMode = if (vm.editMode == EditMode.AddText) EditMode.Select else EditMode.AddText
-            if (vm.editMode == EditMode.AddText) vm.tell("Tap the page where the text should go")
+            if (vm.editMode == EditMode.AddText) vm.tell(textHint)
         }
         // as Add text: a mode, then a tap places the picture there
-        EditBarItem(LucideIcons.ImagePlus, "Add image", vm.editMode == EditMode.AddImage, 78.dp) {
+        EditBarItem(LucideIcons.ImagePlus, stringResource(R.string.edit_add_image), vm.editMode == EditMode.AddImage, 78.dp) {
             vm.editMode = if (vm.editMode == EditMode.AddImage) EditMode.Select else EditMode.AddImage
-            if (vm.editMode == EditMode.AddImage) vm.tell("Tap the page where the picture should go")
+            if (vm.editMode == EditMode.AddImage) vm.tell(imageHint)
         }
     }
 }
@@ -192,19 +197,21 @@ private fun EditFormatBar(vm: AppViewModel, doc: OpenDocument, para: Paragraph) 
         ) {
             val underline = vm.editUnderline[para.page to para.number] == true
             // the reference draws these as serif T's: heavy, slanted, underlined, and a small t beside a big one
-            LetterButton("T", "Bold", para.bold, weight = FontWeight.Black) { vm.styleParagraph(doc, para, mapOf("bold" to !para.bold)) }
-            LetterButton("T", "Italic", para.italic, italic = true) { vm.styleParagraph(doc, para, mapOf("italic" to !para.italic)) }
-            LetterButton("T", "Underline", underline, underline = true) {
+            LetterButton("T", stringResource(R.string.edit_bold), para.bold, weight = FontWeight.Black) { vm.styleParagraph(doc, para, mapOf("bold" to !para.bold)) }
+            LetterButton("T", stringResource(R.string.edit_italic), para.italic, italic = true) { vm.styleParagraph(doc, para, mapOf("italic" to !para.italic)) }
+            LetterButton("T", stringResource(R.string.edit_underline), underline, underline = true) {
                 vm.editUnderline[para.page to para.number] = !underline
                 vm.styleParagraph(doc, para, mapOf("underline" to !underline))
             }
-            LetterButton("tT", "Text size", panel == FormatPanel.Size, small = true) { toggle(FormatPanel.Size) }
+            LetterButton("tT", stringResource(R.string.edit_text_size), panel == FormatPanel.Size, small = true) { toggle(FormatPanel.Size) }
+            val fontLabel = stringResource(R.string.edit_font)
             Box(
-                Modifier.size(44.dp).clickable(role = Role.Button) { toggle(FormatPanel.Font) }.semantics { contentDescription = "Font" },
+                Modifier.size(44.dp).clickable(role = Role.Button) { toggle(FormatPanel.Font) }.semantics { contentDescription = fontLabel },
                 contentAlignment = Alignment.Center,
             ) { Text("Ag", color = if (panel == FormatPanel.Font) c.toolAccent else c.icon, fontSize = 20.sp, fontFamily = FontFamily.Serif) }
+            val colourLabel = stringResource(R.string.edit_colour)
             Box(
-                Modifier.size(44.dp).clickable(role = Role.Button) { toggle(FormatPanel.Color) }.semantics { contentDescription = "Colour" },
+                Modifier.size(44.dp).clickable(role = Role.Button) { toggle(FormatPanel.Color) }.semantics { contentDescription = colourLabel },
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -212,9 +219,9 @@ private fun EditFormatBar(vm: AppViewModel, doc: OpenDocument, para: Paragraph) 
                         .then(if (panel == FormatPanel.Color) Modifier.drawBehind { drawCircle(c.toolAccent, size.minDimension / 2 + 3.dp.toPx(), style = Stroke(2.dp.toPx())) } else Modifier),
                 )
             }
-            FormatButton(alignIcon(vm.editAlign[para.page to para.number] ?: "left"), "Align text", true, tintSelected = panel == FormatPanel.Align || true) { toggle(FormatPanel.Align) }
+            FormatButton(alignIcon(vm.editAlign[para.page to para.number] ?: "left"), stringResource(R.string.edit_align_text), true, tintSelected = panel == FormatPanel.Align || true) { toggle(FormatPanel.Align) }
             // bulleted and numbered lists, as the reference's phone toolbar offers
-            FormatButton(LucideIcons.List, "List", true, tintSelected = true) { toggle(FormatPanel.List) }
+            FormatButton(LucideIcons.List, stringResource(R.string.edit_list), true, tintSelected = true) { toggle(FormatPanel.List) }
         }
     }
 }
@@ -257,7 +264,7 @@ private fun SizePanel(para: Paragraph, onSize: (Float) -> Unit) {
     val c = pdfColors
     var size by remember(para.page, para.number, para.size) { mutableFloatStateOf(para.size.coerceIn(6f, 66f)) }
     Column(Modifier.fillMaxWidth().barTopLine().padding(top = 10.dp, bottom = 6.dp)) {
-        Text("Text size: ${size.roundToInt()} pt", color = c.label, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Text(stringResource(R.string.edit_text_size_pt, size.roundToInt()), color = c.label, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
             Text("A", color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 10.dp))
             Slider(
@@ -275,7 +282,7 @@ private fun SizePanel(para: Paragraph, onSize: (Float) -> Unit) {
 @Composable
 private fun FontPanel(current: String?, onFont: (String) -> Unit) {
     val c = pdfColors
-    val faces = listOf(null to "Original font", "helvetica" to "Sans serif", "times" to "Serif", "courier" to "Monospace")
+    val faces = listOf(null to R.string.edit_font_original, "helvetica" to R.string.edit_font_sans, "times" to R.string.edit_font_serif, "courier" to R.string.edit_font_mono)
     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp).barTopLine().padding(horizontal = 24.dp, vertical = 4.dp)) {
         items(faces.size) { i ->
             val (key, name) = faces[i]
@@ -285,7 +292,7 @@ private fun FontPanel(current: String?, onFont: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    name, color = if (key == null) c.textSecondary else c.label, fontSize = 17.sp, modifier = Modifier.weight(1f),
+                    stringResource(name), color = if (key == null) c.textSecondary else c.label, fontSize = 17.sp, modifier = Modifier.weight(1f),
                     fontFamily = when (key) { "times" -> FontFamily.Serif; "courier" -> FontFamily.Monospace; else -> FontFamily.SansSerif },
                 )
                 if (chosen) Icon(LucideIcons.Check, null, tint = c.textSecondary, modifier = Modifier.size(22.dp))
@@ -300,8 +307,9 @@ private fun ColorPanel(current: String?, onColor: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().barTopLine().padding(horizontal = 12.dp, vertical = 12.dp)) {
         for ((hex, name) in EditColors) {
             val col = parseHex(hex)
+            val label = stringResource(name)
             Box(
-                Modifier.weight(1f).height(40.dp).background(col).clickable { onColor(hex) }.semantics { contentDescription = name },
+                Modifier.weight(1f).height(40.dp).background(col).clickable { onColor(hex) }.semantics { contentDescription = label },
                 contentAlignment = Alignment.Center,
             ) {
                 if (current.equals(hex, ignoreCase = true)) Icon(LucideIcons.Check, null, tint = if (hex == "#ffffff" || hex == "#ffff00" || hex == "#00ffff" || hex == "#00ff00") Color.Black else Color.White, modifier = Modifier.size(22.dp))
@@ -316,8 +324,9 @@ private fun ListPanel(current: ListStyle, onPick: (ListStyle) -> Unit) {
     val c = pdfColors
     Row(Modifier.fillMaxWidth().barTopLine().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
         for (style in ListStyle.entries) {
+            val description = stringResource(listDescription(style))
             Box(
-                Modifier.height(40.dp).widthIn(min = 40.dp).clickable { onPick(style) }.padding(horizontal = 6.dp).semantics { contentDescription = "List ${style.name}" },
+                Modifier.height(40.dp).widthIn(min = 40.dp).clickable { onPick(style) }.padding(horizontal = 6.dp).semantics { contentDescription = description },
                 contentAlignment = Alignment.Center,
             ) { Text(style.label, color = if (style == current) c.toolAccent else c.icon, fontSize = 17.sp, fontWeight = if (style == current) FontWeight.SemiBold else FontWeight.Normal) }
         }
@@ -329,8 +338,9 @@ private fun AlignPanel(current: String, onAlign: (String) -> Unit) {
     val c = pdfColors
     Row(Modifier.fillMaxWidth().barTopLine().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
         for (a in listOf("left", "right", "center", "justify")) {
+            val description = stringResource(alignDescription(a))
             Box(
-                Modifier.size(40.dp).clickable { onAlign(a) }.semantics { contentDescription = "Align ${a}" },
+                Modifier.size(40.dp).clickable { onAlign(a) }.semantics { contentDescription = description },
                 contentAlignment = Alignment.Center,
             ) { Icon(alignIcon(a), null, tint = if (a == current) c.toolAccent else c.icon, modifier = Modifier.size(24.dp)) }
         }
@@ -436,11 +446,11 @@ private fun BoxScope.SelectedParagraph(vm: AppViewModel, doc: OpenDocument, para
     }
     if (move == Offset.Zero && grow == 0f) {
         FloatingMenu(a, b, doc.viewer.padTop) {
-            MenuText("Edit text") { vm.startInlineEdit(para, selectAll = false) }
+            MenuText(stringResource(R.string.edit_edit_text)) { vm.startInlineEdit(para, selectAll = false) }
             MenuSplit()
-            MenuText("Select all") { vm.startInlineEdit(para, selectAll = true) }
+            MenuText(stringResource(R.string.edit_select_all)) { vm.startInlineEdit(para, selectAll = true) }
             MenuSplit()
-            MenuText("Delete") { vm.deleteParagraph(doc, para) }
+            MenuText(stringResource(R.string.common_delete)) { vm.deleteParagraph(doc, para) }
         }
     }
 }
@@ -516,6 +526,7 @@ private fun BoxScope.InlineEditor(vm: AppViewModel, doc: OpenDocument, para: Par
     }
     var paper by remember(para) { mutableStateOf<Color?>(null) }
     LaunchedEffect(para) { paper = vm.paperColor(doc, para) }
+    val paragraphLabel = stringResource(R.string.edit_paragraph_text)
     val fontPx = para.size * ppp
     val sp = with(density) { (fontPx / fontScale).toSp() }
     val family = when (vm.editFont[para.page to para.number] ?: baseFont(para.font)) {
@@ -540,7 +551,7 @@ private fun BoxScope.InlineEditor(vm: AppViewModel, doc: OpenDocument, para: Par
                 ),
                 cursorBrush = SolidColor(SelectionBlue),
                 onTextLayout = { layout = it },
-                modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = "Paragraph text" }
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = paragraphLabel }
                     .drawWithContent {
                         drawContent()
                         val l = layout ?: return@drawWithContent
@@ -658,11 +669,30 @@ private fun BoxScope.SelectedImage(vm: AppViewModel, doc: OpenDocument, img: Edi
     }
     if (move == Offset.Zero && scale == 1f) {
         FloatingMenu(a, b, doc.viewer.padTop) {
-            MenuIconButton(LucideIcons.RotateCcw, "Turn left") { vm.turnImage(doc, img, 3) }
-            MenuIconButton(LucideIcons.RotateCw, "Turn right") { vm.turnImage(doc, img, 1) }
-            MenuIconButton(LucideIcons.Trash2, "Delete") { vm.deleteImage(doc, img) }
+            MenuIconButton(LucideIcons.RotateCcw, stringResource(R.string.edit_turn_left)) { vm.turnImage(doc, img, 3) }
+            MenuIconButton(LucideIcons.RotateCw, stringResource(R.string.edit_turn_right)) { vm.turnImage(doc, img, 1) }
+            MenuIconButton(LucideIcons.Trash2, stringResource(R.string.common_delete)) { vm.deleteImage(doc, img) }
         }
     }
+}
+
+/** What a screen reader says for each list style's button. */
+private fun listDescription(style: ListStyle): Int = when (style) {
+    ListStyle.None -> R.string.edit_list_desc_none
+    ListStyle.Bullet -> R.string.edit_list_desc_bullet
+    ListStyle.Dash -> R.string.edit_list_desc_dash
+    ListStyle.Number -> R.string.edit_list_desc_number
+    ListStyle.Lower -> R.string.edit_list_desc_lower
+    ListStyle.Upper -> R.string.edit_list_desc_upper
+    ListStyle.Roman -> R.string.edit_list_desc_roman
+}
+
+/** What a screen reader says for each alignment's button. */
+private fun alignDescription(a: String): Int = when (a) {
+    "center" -> R.string.edit_align_center
+    "right" -> R.string.edit_align_right
+    "justify" -> R.string.edit_align_justify
+    else -> R.string.edit_align_left
 }
 
 private fun alignIcon(a: String) = when (a) {

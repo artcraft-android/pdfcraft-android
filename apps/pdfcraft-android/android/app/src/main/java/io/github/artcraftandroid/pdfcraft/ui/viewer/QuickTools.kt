@@ -1,6 +1,7 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -56,6 +57,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
@@ -67,23 +71,23 @@ import kotlin.math.roundToInt
  * A tool that can sit on the viewer's bottom toolbar or in More tools: [label] on the bar,
  * [title] in More tools, [subTools] when it opens a row of sub-tools (the bar's corner mark).
  */
-enum class QuickTool(val id: String, val label: String, val title: String, val icon: ImageVector, val hue: Color, val subTools: Boolean = false) {
-    Edit("edit", "Edit PDF", "Edit PDF", LucideIcons.FilePenLine, ToolHues.edit),
-    Comment("comment", "Comment", "Comment", LucideIcons.MessageSquareText, ToolHues.comment, subTools = true),
-    Highlight("highlight", "Highlight", "Highlight", LucideIcons.Highlighter, ToolHues.text, subTools = true),
-    Draw("draw", "Draw", "Draw", LucideIcons.PenLine, ToolHues.sign),
-    FillSign("fillsign", "Fill & Sign", "Fill & Sign", LucideIcons.Signature, ToolHues.sign, subTools = true),
-    Export("export", "Export PDF", "Export PDF", LucideIcons.FileOutput, ToolHues.export),
-    Combine("combine", "Combine", "Combine files", LucideIcons.Combine, ToolHues.combine),
-    Compress("compress", "Compress", "Compress PDF", LucideIcons.FileArchive, ToolHues.compress),
-    Protect("protect", "Password", "Set password", LucideIcons.FileLock2, ToolHues.protect),
-    Organize("organize", "Organize", "Organize pages", LucideIcons.LayoutGrid, ToolHues.organize),
-    Crop("crop", "Crop", "Crop pages", LucideIcons.Crop, ToolHues.crop),
-    Ocr("ocr", "Recognize", "Recognize text", LucideIcons.ScanText, ToolHues.ocr),
-    Create("create", "Create PDF", "Create PDF", LucideIcons.FilePlus2, ToolHues.create),
-    Text("text", "Add text", "Text", LucideIcons.Type, ToolHues.text),
-    Scan("scan", "Scan", "Scan", LucideIcons.Camera, ToolHues.scan),
-    ReadAloud("readaloud", "Read aloud", "Read aloud", LucideIcons.Volume2, ToolHues.read);
+enum class QuickTool(val id: String, @StringRes val label: Int, @StringRes val title: Int, val icon: ImageVector, val hue: Color, val subTools: Boolean = false) {
+    Edit("edit", R.string.common_tool_edit_pdf, R.string.common_tool_edit_pdf, LucideIcons.FilePenLine, ToolHues.edit),
+    Comment("comment", R.string.common_tool_comment, R.string.common_tool_comment, LucideIcons.MessageSquareText, ToolHues.comment, subTools = true),
+    Highlight("highlight", R.string.common_tool_highlight, R.string.common_tool_highlight, LucideIcons.Highlighter, ToolHues.text, subTools = true),
+    Draw("draw", R.string.common_tool_draw, R.string.common_tool_draw, LucideIcons.PenLine, ToolHues.sign),
+    FillSign("fillsign", R.string.common_tool_fill_sign, R.string.common_tool_fill_sign, LucideIcons.Signature, ToolHues.sign, subTools = true),
+    Export("export", R.string.common_tool_export, R.string.common_tool_export, LucideIcons.FileOutput, ToolHues.export),
+    Combine("combine", R.string.toolbar_label_combine, R.string.common_tool_combine, LucideIcons.Combine, ToolHues.combine),
+    Compress("compress", R.string.toolbar_label_compress, R.string.common_tool_compress, LucideIcons.FileArchive, ToolHues.compress),
+    Protect("protect", R.string.toolbar_label_password, R.string.common_tool_set_password, LucideIcons.FileLock2, ToolHues.protect),
+    Organize("organize", R.string.toolbar_label_organize, R.string.common_tool_organize, LucideIcons.LayoutGrid, ToolHues.organize),
+    Crop("crop", R.string.toolbar_label_crop, R.string.common_tool_crop, LucideIcons.Crop, ToolHues.crop),
+    Ocr("ocr", R.string.toolbar_label_recognize, R.string.common_tool_recognize_text, LucideIcons.ScanText, ToolHues.ocr),
+    Create("create", R.string.common_tool_create_pdf, R.string.common_tool_create_pdf, LucideIcons.FilePlus2, ToolHues.create),
+    Text("text", R.string.toolbar_label_add_text, R.string.toolbar_tool_text, LucideIcons.Type, ToolHues.text),
+    Scan("scan", R.string.common_tool_scan, R.string.common_tool_scan, LucideIcons.Camera, ToolHues.scan),
+    ReadAloud("readaloud", R.string.common_tool_read_aloud, R.string.common_tool_read_aloud, LucideIcons.Volume2, ToolHues.read);
 
     companion object {
         /** The bar as it comes: the reference's default tools and order. */
@@ -204,6 +208,8 @@ fun CustomizeToolbar(vm: AppViewModel, onDone: () -> Unit) {
 
     @Composable
     fun Draggable(t: QuickTool, content: @Composable () -> Unit) {
+        val title = stringResource(t.title)
+        val description = if (t in bar) stringResource(R.string.toolbar_tool_on_bar, title) else stringResource(R.string.toolbar_tool_in_more_tools, title)
         Box(
             Modifier
                 .onGloballyPositioned { rects[t] = it.boundsInRoot() }
@@ -227,25 +233,25 @@ fun CustomizeToolbar(vm: AppViewModel, onDone: () -> Unit) {
                     )
                 }
                 .clickable(role = Role.Button) { if (t in bar) toGrid(t, 0) else toBar(t, bar.size) }
-                .semantics { contentDescription = if (t in bar) "${t.title}, on the toolbar" else "${t.title}, in More tools" },
+                .semantics { contentDescription = description },
         ) { content() }
     }
 
     Box(Modifier.fillMaxWidth().onGloballyPositioned { origin = it.boundsInRoot().topLeft }) {
         Column {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Customize toolbar", color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                BarIcon(LucideIcons.X, "Cancel", onDone)
-                BarIcon(LucideIcons.Check, "Save toolbar", {
+                Text(stringResource(R.string.toolbar_customize), color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                BarIcon(LucideIcons.X, stringResource(R.string.common_cancel), onDone)
+                BarIcon(LucideIcons.Check, stringResource(R.string.toolbar_save), {
                     prefs.save(bar.toList(), grid.toList())
                     onDone()
                 }, tint = c.accent)
             }
             Text(
-                "Drag tools between the toolbar and More tools. The toolbar holds $slots.",
+                pluralStringResource(R.plurals.toolbar_customize_hint, slots, slots),
                 color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
             )
-            Text("Toolbar", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 6.dp))
+            Text(stringResource(R.string.toolbar_section_toolbar), color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp, bottom = 6.dp))
             BoxWithConstraints(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(8.dp)).background(c.pressed)
                     .onGloballyPositioned { barRect = it.boundsInRoot() },
@@ -258,7 +264,7 @@ fun CustomizeToolbar(vm: AppViewModel, onDone: () -> Unit) {
                     Box(Modifier.alpha(0.5f)) { BarTool(null, itemW) }
                 }
             }
-            Text("More tools", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp))
+            Text(stringResource(R.string.common_tool_more_tools), color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp))
             Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).heightIn(min = 96.dp).onGloballyPositioned { gridRect = it.boundsInRoot() }) {
                 grid.chunked(4).forEach { row ->
                     Row(Modifier.fillMaxWidth()) {
@@ -291,7 +297,7 @@ private fun BarTool(tool: QuickTool?, width: androidx.compose.ui.unit.Dp) {
         Icon(tool?.icon ?: LucideIcons.LayoutGrid, null, tint = c.icon, modifier = Modifier.size(24.dp))
         Spacer(Modifier.height(6.dp))
         Text(
-            tool?.label ?: "More tools", color = c.text, fontSize = 12.sp, lineHeight = 14.sp, maxLines = 2,
+            stringResource(tool?.label ?: R.string.common_tool_more_tools), color = c.text, fontSize = 12.sp, lineHeight = 14.sp, maxLines = 2,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = TextAlign.Center,
         )
     }
@@ -306,6 +312,6 @@ private fun GridTool(tool: QuickTool) {
             Icon(tool.icon, null, tint = tool.hue, modifier = Modifier.size(26.dp))
         }
         Spacer(Modifier.height(8.dp))
-        Text(tool.title, color = c.text, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 2, lineHeight = 16.sp)
+        Text(stringResource(tool.title), color = c.text, fontSize = 13.sp, textAlign = TextAlign.Center, maxLines = 2, lineHeight = 16.sp)
     }
 }

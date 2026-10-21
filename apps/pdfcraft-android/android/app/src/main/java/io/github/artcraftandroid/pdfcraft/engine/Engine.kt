@@ -1,10 +1,12 @@
 package io.github.artcraftandroid.pdfcraft.engine
 
 import android.graphics.Bitmap
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.MobileException
 import io.github.artcraftandroid.pdfcraft.core.MobileSession
 import io.github.artcraftandroid.pdfcraft.core.RenderedImage
 import io.github.artcraftandroid.pdfcraft.core.initLogging
+import io.github.artcraftandroid.pdfcraft.text
 import java.nio.ByteBuffer
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +96,7 @@ fun RenderedImage.toBitmap(): Bitmap {
 /** The user-facing message of an engine failure. */
 val Throwable.userMessage: String
     get() = when (this) {
-        is MobileException.NeedsPassword -> "This document is protected by a password."
-        is MobileException.WrongPassword -> "The password is incorrect."
-        else -> message?.takeIf { it.isNotBlank() } ?: "Something went wrong."
+        is MobileException.NeedsPassword -> text(R.string.files_error_needs_password)
+        is MobileException.WrongPassword -> text(R.string.common_wrong_password)
+        else -> message?.takeIf { it.isNotBlank() } ?: text(R.string.files_error_generic)
     }

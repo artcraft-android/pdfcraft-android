@@ -1,5 +1,6 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -47,7 +49,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.engine.DigitalId
+import io.github.artcraftandroid.pdfcraft.text as appText
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
@@ -132,17 +136,17 @@ fun parseSignatures(o: JSONObject): List<SignatureEntry> {
 class CertTarget(val doc: OpenDocument, val field: String?, val page: Int, val rect: FloatArray?)
 
 /** What a digital signature shows on the page beside the signer's details. */
-enum class CertLook(val label: String) { Name("Name only"), Typed("Typed name"), Drawn("My signature") }
+enum class CertLook(@StringRes val label: Int) { Name(R.string.sign_look_name), Typed(R.string.sign_look_typed), Drawn(R.string.sign_look_drawn) }
 
 /** A digital ID file picked to add, waiting for its password ([wrong]: the last one didn't open it). */
 class IdImport(val file: java.io.File, val name: String, val wrong: Boolean)
 
 /** A signature's status in a few words, for the list and the message on opening. */
 fun SignatureEntry.statusLabel(): String = when {
-    !signed -> "Not signed yet"
-    status == "valid" -> "Valid"
-    status == "invalid" -> "Invalid"
-    else -> "Signer not verified"
+    !signed -> appText(R.string.sign_status_unsigned)
+    status == "valid" -> appText(R.string.sign_status_valid)
+    status == "invalid" -> appText(R.string.sign_status_invalid)
+    else -> appText(R.string.sign_status_unknown)
 }
 
 private val ValidGreen = Color(0xFF12805C)
@@ -210,8 +214,8 @@ fun CertPlaceLayer(vm: AppViewModel, doc: OpenDocument) {
                 .clip(RoundedCornerShape(8.dp)).background(c.surface).padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Drag a box where the signature goes", color = c.text, fontSize = 14.sp, modifier = Modifier.weight(1f, fill = false))
-            TextButton(onClick = { vm.certPlacing = null }) { Text("Cancel", color = c.accent) }
+            Text(stringResource(R.string.sign_place_hint), color = c.text, fontSize = 14.sp, modifier = Modifier.weight(1f, fill = false))
+            TextButton(onClick = { vm.certPlacing = null }) { Text(stringResource(R.string.common_cancel), color = c.accent) }
         }
     }
 }
@@ -250,53 +254,53 @@ fun CertSignScreen(vm: AppViewModel, target: CertTarget) {
     }
     Column(Modifier.fillMaxSize().background(c.surface).pointerInput(Unit) { detectTapGestures() }.safeTopPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { vm.certSign = null }) { Text("Cancel", color = c.accent) }
-            Text("Sign with a digital ID", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            TextButton(onClick = ::sign, enabled = canSign) { Text("Sign", color = if (canSign) c.accent else c.textSecondary, fontWeight = FontWeight.SemiBold) }
+            TextButton(onClick = { vm.certSign = null }) { Text(stringResource(R.string.common_cancel), color = c.accent) }
+            Text(stringResource(R.string.common_tool_sign_digital_id), color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TextButton(onClick = ::sign, enabled = canSign) { Text(stringResource(R.string.common_sign), color = if (canSign) c.accent else c.textSecondary, fontWeight = FontWeight.SemiBold) }
         }
         SheetDivider(inset = 0.dp)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-            Section("Digital ID")
+            Section(stringResource(R.string.sign_section_id))
             if (ids.isEmpty()) {
                 Text(
-                    "You don't have a digital ID yet. Add the .p12 or .pfx file you were given, or create one for yourself.",
+                    stringResource(R.string.sign_no_id),
                     color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 )
             }
             for (id in ids) IdRow(vm, id, selected = id == chosen) { vm.chosenId = id }
-            SheetRow(LucideIcons.FolderOpen, "Add a digital ID file", { vm.pickDigitalId() })
-            SheetRow(LucideIcons.Plus, "Create a digital ID", { vm.idCreate = true })
+            SheetRow(LucideIcons.FolderOpen, stringResource(R.string.sign_add_id_file), { vm.pickDigitalId() })
+            SheetRow(LucideIcons.Plus, stringResource(R.string.sign_create_id), { vm.idCreate = true })
             SheetDivider(vertical = 6.dp)
 
-            Section("Appearance")
+            Section(stringResource(R.string.sign_section_appearance))
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (l in CertLook.entries) {
                     val enabled = l != CertLook.Drawn || hasDrawn
-                    Chip(l.label, look == l, enabled) { look = l }
+                    Chip(stringResource(l.label), look == l, enabled) { look = l }
                 }
             }
             Text(
                 when (look) {
-                    CertLook.Name -> "Your name and the date in the box."
-                    CertLook.Typed -> "Your name in a script font, with your name and the date beside it."
-                    CertLook.Drawn -> if (hasDrawn) "Your saved Fill & Sign signature, with your name and the date beside it." else "Make a signature in Fill & Sign first."
+                    CertLook.Name -> stringResource(R.string.sign_look_name_about)
+                    CertLook.Typed -> stringResource(R.string.sign_look_typed_about)
+                    CertLook.Drawn -> stringResource(if (hasDrawn) R.string.sign_look_drawn_about else R.string.sign_look_drawn_missing)
                 },
                 color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
             SheetDivider(vertical = 6.dp)
 
-            Section("Reason (optional)")
-            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(reason, { reason = it }, "For example: I approve this document", keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)) }
+            Section(stringResource(R.string.sign_section_reason))
+            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(reason, { reason = it }, stringResource(R.string.sign_reason_hint), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)) }
             Spacer(Modifier.height(12.dp))
-            Section("Location (optional)")
-            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(location, { location = it }, "City or place", keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)) }
+            Section(stringResource(R.string.sign_section_location))
+            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(location, { location = it }, stringResource(R.string.sign_location_hint), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)) }
             Spacer(Modifier.height(12.dp))
 
             if (chosen != null) {
-                Section("Password for ${chosen.name}")
+                Section(stringResource(R.string.sign_section_password, chosen.name))
                 Box(Modifier.padding(horizontal = 16.dp)) {
                     PdfField(
-                        password, { password = it; vm.certSignError = null }, "Digital ID password", password = true, error = vm.certSignError != null,
+                        password, { password = it; vm.certSignError = null }, stringResource(R.string.sign_id_password), password = true, error = vm.certSignError != null,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { sign() }),
                     )
@@ -304,7 +308,7 @@ fun CertSignScreen(vm: AppViewModel, target: CertTarget) {
             }
             (vm.certSignError ?: unusable)?.let { Text(it, color = c.red, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
             Text(
-                "Signing saves the document. Anyone who opens it can check that it hasn't changed since; changes made after signing are listed with the signature.",
+                stringResource(R.string.sign_saves_note),
                 color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
         }
@@ -322,8 +326,8 @@ internal fun readableName(dn: String): String {
 
 /** Why [id] can't sign now, if it can't. */
 private fun idProblem(id: DigitalId): String? = when {
-    id.expired() -> "This digital ID expired on ${shortDate(id.validTo * 1000)}."
-    id.notYetValid() -> "This digital ID isn't valid until ${shortDate(id.validFrom * 1000)}."
+    id.expired() -> appText(R.string.sign_id_expired, shortDate(id.validTo * 1000))
+    id.notYetValid() -> appText(R.string.sign_id_not_yet_valid, shortDate(id.validFrom * 1000))
     else -> null
 }
 
@@ -365,17 +369,17 @@ private fun IdRow(vm: AppViewModel, id: DigitalId, selected: Boolean, onClick: (
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Text(id.name, color = c.text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val by = if (id.selfSigned) "Self-signed" else "Issued by ${readableName(id.issuer)}"
-            val until = idProblem(id) ?: "Valid until ${shortDate(id.validTo * 1000)}"
+            val by = if (id.selfSigned) stringResource(R.string.sign_id_self_signed) else stringResource(R.string.sign_id_issued_by, readableName(id.issuer))
+            val until = idProblem(id) ?: stringResource(R.string.sign_id_valid_until, shortDate(id.validTo * 1000))
             Text("$by · $until", color = if (idProblem(id) != null) c.red else c.textSecondary, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        BarIcon(LucideIcons.Trash2, "Remove ${id.name}'s digital ID", { confirm = true }, size = 40.dp)
+        BarIcon(LucideIcons.Trash2, stringResource(R.string.sign_remove_id_description, id.name), { confirm = true }, size = 40.dp)
     }
     if (confirm) {
         PdfDialog(
-            onDismiss = { confirm = false }, title = "Remove digital ID?", confirm = "Remove", destructive = true,
+            onDismiss = { confirm = false }, title = stringResource(R.string.sign_remove_id_title), confirm = stringResource(R.string.sign_remove), destructive = true,
             onConfirm = { confirm = false; vm.removeDigitalId(id) },
-        ) { Text("${id.name}'s digital ID is removed from PdfCraft. Documents already signed with it keep their signatures.", color = c.text, fontSize = 14.sp) }
+        ) { Text(stringResource(R.string.sign_remove_id_message, id.name), color = c.text, fontSize = 14.sp) }
     }
 }
 
@@ -386,15 +390,15 @@ fun IdPasswordDialog(vm: AppViewModel, imp: IdImport) {
     var pw by remember(imp) { mutableStateOf("") }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     androidx.compose.runtime.LaunchedEffect(imp) { runCatching { focus.requestFocus() } }
-    PdfDialog(onDismiss = { vm.answerIdImport(null) }, title = "Digital ID password", confirm = "Add", onConfirm = { vm.answerIdImport(pw) }) {
-        Text("Enter the password that protects ${imp.name}.", color = c.text, fontSize = 14.sp)
+    PdfDialog(onDismiss = { vm.answerIdImport(null) }, title = stringResource(R.string.sign_id_password), confirm = stringResource(R.string.sign_add), onConfirm = { vm.answerIdImport(pw) }) {
+        Text(stringResource(R.string.sign_id_password_prompt, imp.name), color = c.text, fontSize = 14.sp)
         Spacer(Modifier.height(14.dp))
         PdfField(
-            pw, { pw = it }, "Password", error = imp.wrong, password = true, focus = focus,
+            pw, { pw = it }, stringResource(R.string.common_password), error = imp.wrong, password = true, focus = focus,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { vm.answerIdImport(pw) }),
         )
-        if (imp.wrong) Text("The password is incorrect.", color = c.red, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+        if (imp.wrong) Text(stringResource(R.string.common_wrong_password), color = c.red, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
@@ -410,43 +414,42 @@ fun CreateIdScreen(vm: AppViewModel) {
     var again by remember { mutableStateOf("") }
     val problem = when {
         name.isBlank() -> null
-        password.isNotEmpty() && password.length < 6 -> "The password needs at least 6 characters."
-        again.isNotEmpty() && again != password -> "The passwords don't match."
+        password.isNotEmpty() && password.length < 6 -> stringResource(R.string.sign_password_short)
+        again.isNotEmpty() && again != password -> stringResource(R.string.sign_password_mismatch)
         else -> null
     }
     val ok = name.isNotBlank() && password.length >= 6 && again == password
     Column(Modifier.fillMaxSize().background(c.surface).pointerInput(Unit) { detectTapGestures() }.safeTopPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { vm.idCreate = false }) { Text("Cancel", color = c.accent) }
-            Text("Create a digital ID", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+            TextButton(onClick = { vm.idCreate = false }) { Text(stringResource(R.string.common_cancel), color = c.accent) }
+            Text(stringResource(R.string.sign_create_id), color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
             TextButton(onClick = { vm.createDigitalId(name, email, organization, password) }, enabled = ok) {
-                Text("Create", color = if (ok) c.accent else c.textSecondary, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.common_create), color = if (ok) c.accent else c.textSecondary, fontWeight = FontWeight.SemiBold)
             }
         }
         SheetDivider(inset = 0.dp)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
             Text(
-                "A digital ID made here is self-signed: a document you sign with it shows any change made after you signed, but nobody else vouches that it's you. " +
-                    "For that, use the ID file an organisation or a certificate authority gives you.",
+                stringResource(R.string.sign_create_about),
                 color = c.textSecondary, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
-            Section("Name")
-            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(name, { name = it }, "Your name") }
-            Section("Email (optional)")
-            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(email, { email = it }, "name@example.com", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)) }
-            Section("Organisation (optional)")
-            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(organization, { organization = it }, "Company or organisation") }
-            Section("Password")
+            Section(stringResource(R.string.sign_section_name))
+            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(name, { name = it }, stringResource(R.string.common_your_name)) }
+            Section(stringResource(R.string.sign_section_email))
+            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(email, { email = it }, stringResource(R.string.sign_email_hint), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)) }
+            Section(stringResource(R.string.sign_section_organisation))
+            Box(Modifier.padding(horizontal = 16.dp)) { PdfField(organization, { organization = it }, stringResource(R.string.sign_organisation_hint)) }
+            Section(stringResource(R.string.common_password))
             Box(Modifier.padding(horizontal = 16.dp)) {
-                PdfField(password, { password = it }, "At least 6 characters", password = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                PdfField(password, { password = it }, stringResource(R.string.sign_password_hint), password = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
             }
             Spacer(Modifier.height(10.dp))
             Box(Modifier.padding(horizontal = 16.dp)) {
-                PdfField(again, { again = it }, "The password again", password = true, error = again.isNotEmpty() && again != password, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done))
+                PdfField(again, { again = it }, stringResource(R.string.sign_password_again), password = true, error = again.isNotEmpty() && again != password, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done))
             }
             problem?.let { Text(it, color = c.red, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) }
             Text(
-                "PdfCraft doesn't keep the password and can't recover it: you type it each time you sign.",
+                stringResource(R.string.sign_password_note),
                 color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
             )
         }
@@ -457,8 +460,8 @@ fun CreateIdScreen(vm: AppViewModel) {
 @Composable
 fun SignFieldChoiceDialog(vm: AppViewModel, doc: OpenDocument, field: io.github.artcraftandroid.pdfcraft.core.WidgetInfo) {
     PdfDialog(onDismiss = { vm.signFieldChoice = null }, title = null, confirm = null, dismiss = null, list = true) {
-        SheetRow(LucideIcons.Signature, "Add your signature", { vm.signFieldChoice = null; vm.drawSignatureInField(doc, field) })
-        SheetRow(LucideIcons.ShieldCheck, "Sign with a digital ID", { vm.signFieldChoice = null; vm.signFieldWithId(doc, field) })
+        SheetRow(LucideIcons.Signature, stringResource(R.string.sign_add_your_signature), { vm.signFieldChoice = null; vm.drawSignatureInField(doc, field) })
+        SheetRow(LucideIcons.ShieldCheck, stringResource(R.string.common_tool_sign_digital_id), { vm.signFieldChoice = null; vm.signFieldWithId(doc, field) })
     }
 }
 
@@ -478,11 +481,11 @@ fun SignaturesSheet(vm: AppViewModel, doc: OpenDocument) {
     vm.trustedCerts.version
     var open by remember { mutableStateOf<String?>(null) }
     PdfSheet(onDismiss = ::close, maxHeightFraction = 0.85f) {
-        SheetTitle("Signatures")
+        SheetTitle(stringResource(R.string.sign_signatures))
         Column(Modifier.verticalScroll(rememberScrollState())) {
             val list = doc.signatures
             if (list.isEmpty()) {
-                Text("This document has no signatures.", color = c.textSecondary, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                Text(stringResource(R.string.sign_none), color = c.textSecondary, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             }
             for (s in list) {
                 val (icon, tint) = statusIcon(s)
@@ -493,12 +496,12 @@ fun SignaturesSheet(vm: AppViewModel, doc: OpenDocument) {
                     Icon(icon, null, tint = tint, modifier = Modifier.padding(top = 2.dp).size(24.dp))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (s.signed) s.signer ?: "Unknown signer" else "Empty signature field", color = c.text, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(if (s.signed) s.signer ?: stringResource(R.string.sign_unknown_signer) else stringResource(R.string.sign_empty_field), color = c.text, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         val sub = listOfNotNull(
                             s.statusLabel(),
-                            if (s.certify != null && s.signed) "Certified" else null,
+                            if (s.certify != null && s.signed) stringResource(R.string.sign_certified) else null,
                             pdfDateLabel(s.date),
-                            s.page?.let { "Page ${it + 1}" }.takeIf { !s.signed },
+                            s.page?.let { stringResource(R.string.sheet_page, it + 1) }.takeIf { !s.signed },
                         ).joinToString(" · ")
                         Text(sub, color = if (s.status == "invalid") c.red else c.textSecondary, fontSize = 13.sp)
                         if (open == s.field) SignatureDetails(vm, doc, s)
@@ -507,7 +510,7 @@ fun SignaturesSheet(vm: AppViewModel, doc: OpenDocument) {
                 }
                 SheetDivider()
             }
-            SheetRow(LucideIcons.ShieldCheck, "Add a digital signature", { close(); vm.startCertPlacing(doc) })
+            SheetRow(LucideIcons.ShieldCheck, stringResource(R.string.sign_add_signature), { close(); vm.startCertPlacing(doc) })
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -517,50 +520,64 @@ fun SignaturesSheet(vm: AppViewModel, doc: OpenDocument) {
 private fun SignatureDetails(vm: AppViewModel, doc: OpenDocument, s: SignatureEntry) {
     val c = pdfColors
     @Composable
-    fun line(label: String, value: String?) {
+    fun line(text: String) {
+        Text(text, color = c.text, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+    /** The line [format] fills with [value], when there is a value. */
+    @Composable
+    fun detail(@StringRes format: Int, value: String?) {
         if (value.isNullOrBlank()) return
-        Text("$label: $value", color = c.text, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+        line(stringResource(format, value))
     }
     Column(Modifier.padding(top = 4.dp)) {
         if (s.signed) {
-            line("Reason", s.reason)
-            line("Location", s.location)
+            detail(R.string.sign_detail_reason, s.reason)
+            detail(R.string.sign_detail_location, s.location)
             s.cert?.let { cert ->
-                line("Certificate", if (cert.selfSigned) "self-signed" else "issued by ${readableName(cert.issuer)}")
-                line("Valid until", pdfDateLabel(cert.validTo))
+                line(if (cert.selfSigned) stringResource(R.string.sign_detail_cert_self_signed) else stringResource(R.string.sign_detail_cert_issued_by, readableName(cert.issuer)))
+                detail(R.string.sign_detail_valid_until, pdfDateLabel(cert.validTo))
             }
             s.certify?.let {
-                line("Certified", when (it) { 1 -> "no changes allowed"; 2 -> "form filling allowed"; else -> "form filling and comments allowed" })
+                line(
+                    stringResource(
+                        when (it) {
+                            1 -> R.string.sign_detail_certified_no_changes
+                            2 -> R.string.sign_detail_certified_forms
+                            else -> R.string.sign_detail_certified_comments
+                        },
+                    ),
+                )
             }
+            // the changes are the engine's own words, listed as it gives them
+            val changes = s.changes.joinToString("; ")
             line(
-                "Changes since signing",
                 when (s.modification) {
-                    "none" -> "none"
-                    "allowed" -> "allowed ones" + if (s.changes.isEmpty()) "" else " (${s.changes.joinToString("; ")})"
-                    else -> "some that aren't allowed" + if (s.changes.isEmpty()) "" else " (${s.changes.joinToString("; ")})"
+                    "none" -> stringResource(R.string.sign_detail_changes_none)
+                    "allowed" -> if (s.changes.isEmpty()) stringResource(R.string.sign_detail_changes_allowed) else stringResource(R.string.sign_detail_changes_allowed_list, changes)
+                    else -> if (s.changes.isEmpty()) stringResource(R.string.sign_detail_changes_disallowed) else stringResource(R.string.sign_detail_changes_disallowed_list, changes)
                 },
             )
             for (d in s.details) Text("• $d", color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
         } else {
-            Text("Nobody has signed this field yet.", color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+            Text(stringResource(R.string.sign_field_unsigned), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
         }
         Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (s.page != null && s.rect != null) {
-                TextButton(onClick = { doc.controller.sheet = ViewerSheet.None; vm.showSignature(doc, s) }) { Text("Go to it", color = c.accent) }
+                TextButton(onClick = { doc.controller.sheet = ViewerSheet.None; vm.showSignature(doc, s) }) { Text(stringResource(R.string.sign_go_to), color = c.accent) }
             }
             val sha = s.cert?.sha256
             if (s.signed && sha != null) {
                 if (vm.trustedCerts.contains(sha)) {
-                    TextButton(onClick = { vm.untrustSigner(doc, s) }) { Text("Stop trusting", color = c.accent) }
+                    TextButton(onClick = { vm.untrustSigner(doc, s) }) { Text(stringResource(R.string.sign_stop_trusting), color = c.accent) }
                 } else if (s.status == "unknown") {
-                    TextButton(onClick = { vm.trustSigner(doc, s) }) { Text("Trust this signer", color = c.accent) }
+                    TextButton(onClick = { vm.trustSigner(doc, s) }) { Text(stringResource(R.string.sign_trust), color = c.accent) }
                 }
             }
             if (!s.signed) {
                 TextButton(onClick = {
                     doc.controller.sheet = ViewerSheet.None
                     doc.widgets.firstOrNull { it.field == s.field }?.let { vm.signFieldWithId(doc, it) }
-                }) { Text("Sign", color = c.accent) }
+                }) { Text(stringResource(R.string.common_sign), color = c.accent) }
             }
         }
     }

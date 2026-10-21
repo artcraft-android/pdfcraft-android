@@ -37,6 +37,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,9 +46,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.AttachmentInfo
 import io.github.artcraftandroid.pdfcraft.core.CommentInfo
 import io.github.artcraftandroid.pdfcraft.core.OutlineEntry
+import io.github.artcraftandroid.pdfcraft.plural
+import io.github.artcraftandroid.pdfcraft.text
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
@@ -94,57 +98,60 @@ fun MoreSheet(vm: AppViewModel, doc: OpenDocument) {
                 Text(doc.title, color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(LucideIcons.Smartphone, "Stored on this device", tint = c.icon, modifier = Modifier.size(16.dp))
+                    Icon(LucideIcons.Smartphone, stringResource(R.string.sheet_stored_on_device), tint = c.icon, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("PDF • ${modifiedLabel(doc.file.lastModified())}" + if (!doc.writable) " • Read-only" else "", color = c.text, fontSize = 13.sp)
+                    Text(
+                        "PDF • ${modifiedLabel(doc.file.lastModified(), stringResource(R.string.common_yesterday))}" + if (!doc.writable) " • " + stringResource(R.string.sheet_read_only) else "",
+                        color = c.text, fontSize = 13.sp,
+                    )
                 }
             }
-            BarIcon(LucideIcons.Printer, "Print", { close(); vm.print(doc) }, size = 40.dp)
-            BarIcon(LucideIcons.Star, if (starred) "Remove the star" else "Add a star", { vm.toggleStar(doc) },
+            BarIcon(LucideIcons.Printer, stringResource(R.string.sheet_print), { close(); vm.print(doc) }, size = 40.dp)
+            BarIcon(LucideIcons.Star, stringResource(if (starred) R.string.sheet_remove_star else R.string.sheet_add_star), { vm.toggleStar(doc) },
                 tint = if (starred) Color(0xFFF5B800) else c.icon, size = 40.dp)
         }
         SheetDivider()
         Column(Modifier.verticalScroll(scroll).padding(top = 5.dp)) {
-            SheetRow(LucideIcons.Glasses, "View settings", { ctl.sheet = ViewerSheet.ViewSettings }, chevron = true)
-            SheetRow(LucideIcons.LayoutGrid, "Pages", { close(); ctl.pagesOpen = true }, chevron = true)
-            if (doc.info.attachments > 0u) SheetRow(LucideIcons.Paperclip, "Attachments", { ctl.sheet = ViewerSheet.Attachments }, chevron = true)
-            SheetRow(LucideIcons.Bookmark, "Bookmarks & Table of Contents", { ctl.sheet = ViewerSheet.Bookmarks }, chevron = true)
-            SheetRow(LucideIcons.MessagesSquare, "Comment List", { ctl.sheet = ViewerSheet.Comments }, chevron = true)
-            SheetRow(LucideIcons.ShieldCheck, "Signatures", { ctl.sheet = ViewerSheet.Signatures }, chevron = true)
+            SheetRow(LucideIcons.Glasses, stringResource(R.string.sheet_view_settings), { ctl.sheet = ViewerSheet.ViewSettings }, chevron = true)
+            SheetRow(LucideIcons.LayoutGrid, stringResource(R.string.sheet_pages), { close(); ctl.pagesOpen = true }, chevron = true)
+            if (doc.info.attachments > 0u) SheetRow(LucideIcons.Paperclip, stringResource(R.string.sheet_attachments), { ctl.sheet = ViewerSheet.Attachments }, chevron = true)
+            SheetRow(LucideIcons.Bookmark, stringResource(R.string.sheet_bookmarks_contents), { ctl.sheet = ViewerSheet.Bookmarks }, chevron = true)
+            SheetRow(LucideIcons.MessagesSquare, stringResource(R.string.sheet_comment_list), { ctl.sheet = ViewerSheet.Comments }, chevron = true)
+            SheetRow(LucideIcons.ShieldCheck, stringResource(R.string.sign_signatures), { ctl.sheet = ViewerSheet.Signatures }, chevron = true)
             SheetRow(
                 if (bookmarked) LucideIcons.BookmarkMinus else LucideIcons.BookmarkPlus,
-                if (bookmarked) "Remove bookmark" else "Add bookmark",
+                stringResource(if (bookmarked) R.string.sheet_remove_bookmark else R.string.sheet_add_bookmark),
                 { close(); vm.toggleBookmark(doc) },
             )
-            SheetRow(LucideIcons.Volume2, "Read aloud", { close(); vm.startReadAloud(doc) })
-            SheetRow(LucideIcons.FilePenLine, "Edit PDF", { close(); vm.enterTool(doc, ViewerTool.Edit) })
+            SheetRow(LucideIcons.Volume2, stringResource(R.string.common_tool_read_aloud), { close(); vm.startReadAloud(doc) })
+            SheetRow(LucideIcons.FilePenLine, stringResource(R.string.common_tool_edit_pdf), { close(); vm.enterTool(doc, ViewerTool.Edit) })
             GroupDivider()
-            SheetRow(LucideIcons.FileOutput, "Export as...", { close(); vm.openExport(doc) })
-            SheetRow(LucideIcons.FileArchive, "Compress PDF", { close(); vm.openCompress(doc) })
-            SheetRow(LucideIcons.Combine, "Combine files", { close(); vm.openCombine(doc) })
-            SheetRow(LucideIcons.FileLock2, "Set password", { close(); vm.openProtect(doc) })
-            SheetRow(LucideIcons.FilePlus2, "Create PDF", { close(); vm.openCreate() })
+            SheetRow(LucideIcons.FileOutput, stringResource(R.string.sheet_export_as), { close(); vm.openExport(doc) })
+            SheetRow(LucideIcons.FileArchive, stringResource(R.string.common_tool_compress), { close(); vm.openCompress(doc) })
+            SheetRow(LucideIcons.Combine, stringResource(R.string.common_tool_combine), { close(); vm.openCombine(doc) })
+            SheetRow(LucideIcons.FileLock2, stringResource(R.string.common_tool_set_password), { close(); vm.openProtect(doc) })
+            SheetRow(LucideIcons.FilePlus2, stringResource(R.string.common_tool_create_pdf), { close(); vm.openCreate() })
             if (doc.info.undo != null || doc.info.redo != null) {
                 GroupDivider()
-                doc.info.undo?.let { SheetRow(LucideIcons.Undo2, "Undo $it", { close(); vm.undo(doc) }) }
-                doc.info.redo?.let { SheetRow(LucideIcons.Redo2, "Redo $it", { close(); vm.redo(doc) }) }
+                doc.info.undo?.let { SheetRow(LucideIcons.Undo2, stringResource(R.string.sheet_undo_action, it), { close(); vm.undo(doc) }) }
+                doc.info.redo?.let { SheetRow(LucideIcons.Redo2, stringResource(R.string.sheet_redo_action, it), { close(); vm.redo(doc) }) }
             }
             GroupDivider()
-            SheetRow(LucideIcons.Copy, "Save a copy", { close(); vm.saveCopyAs(doc) })
+            SheetRow(LucideIcons.Copy, stringResource(R.string.common_save_copy), { close(); vm.saveCopyAs(doc) })
             Spacer(Modifier.height(8.dp))
         }
     }
 }
 
-/** When the file was modified: the time today, "Yesterday", else the date. */
-internal fun modifiedLabel(t: Long, now: Long = System.currentTimeMillis()): String {
+/** When the file was modified: the time today, [yesterday] ("Yesterday"), else the date. */
+internal fun modifiedLabel(t: Long, yesterday: String, now: Long = System.currentTimeMillis()): String {
     fun day(ms: Long) = java.util.Calendar.getInstance().apply { timeInMillis = ms }.let { it.get(java.util.Calendar.YEAR) * 400 + it.get(java.util.Calendar.DAY_OF_YEAR) }
     val d = Date(t)
     val today = day(now)
-    val yesterday = day(now - 24L * 3600 * 1000)
+    val dayBefore = day(now - 24L * 3600 * 1000)
     return when (day(t)) {
         today -> DateFormat.getTimeInstance(DateFormat.SHORT).format(d)
-        yesterday -> "Yesterday"
+        dayBefore -> yesterday
         else -> DateFormat.getDateInstance(DateFormat.MEDIUM).format(d)
     }
 }
@@ -154,21 +161,21 @@ internal fun modifiedLabel(t: Long, now: Long = System.currentTimeMillis()): Str
 fun ViewSettingsSheet(vm: AppViewModel, doc: OpenDocument) {
     val ctl = doc.controller
     PdfSheet(onDismiss = { ctl.sheet = ViewerSheet.None }) {
-        SheetBackHeader("View settings", onBack = { ctl.sheet = ViewerSheet.More })
-        SheetRow(LucideIcons.GalleryVerticalEnd, "Continuous", {
+        SheetBackHeader(stringResource(R.string.sheet_view_settings), onBack = { ctl.sheet = ViewerSheet.More })
+        SheetRow(LucideIcons.GalleryVerticalEnd, stringResource(R.string.sheet_continuous), {
             vm.setPageMode(doc, PageMode.Continuous)
             ctl.sheet = ViewerSheet.None
         }, checked = doc.viewer.mode == PageMode.Continuous && !vm.readingMode)
-        SheetRow(LucideIcons.File, "Single page", {
+        SheetRow(LucideIcons.File, stringResource(R.string.sheet_single_page), {
             vm.setPageMode(doc, PageMode.SinglePage)
             ctl.sheet = ViewerSheet.None
         }, checked = doc.viewer.mode == PageMode.SinglePage && !vm.readingMode)
-        SheetRow(LucideIcons.BookOpenText, "Reading Mode", {
+        SheetRow(LucideIcons.BookOpenText, stringResource(R.string.sheet_reading_mode), {
             ctl.sheet = ViewerSheet.None
             vm.openReadingMode(doc)
         }, checked = vm.readingMode)
         GroupDivider()
-        SheetRow(LucideIcons.Moon, "Night Mode", { vm.setNightMode(doc, !ctl.nightMode); ctl.sheet = ViewerSheet.None }) {
+        SheetRow(LucideIcons.Moon, stringResource(R.string.sheet_night_mode), { vm.setNightMode(doc, !ctl.nightMode); ctl.sheet = ViewerSheet.None }) {
             PdfSwitch(ctl.nightMode, { vm.setNightMode(doc, it); ctl.sheet = ViewerSheet.None })
         }
         Spacer(Modifier.height(24.dp))
@@ -188,9 +195,9 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
     var parent by remember { mutableStateOf(-1) }
     var renaming by remember { mutableStateOf<Int?>(null) }
     PdfSheet(onDismiss = { ctl.sheet = ViewerSheet.None }, maxHeightFraction = 0.69f, fill = true) {
-        SheetBackHeader("Bookmarks & Table of Contents", onBack = { ctl.sheet = ViewerSheet.More })
+        SheetBackHeader(stringResource(R.string.sheet_bookmarks_contents), onBack = { ctl.sheet = ViewerSheet.More })
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            listOf("Contents", "Bookmarks").forEachIndexed { i, label ->
+            listOf(stringResource(R.string.sheet_tab_contents), stringResource(R.string.sheet_tab_bookmarks)).forEachIndexed { i, label ->
                 Column(
                     Modifier.weight(1f).clickable(role = Role.Tab) { tab = i }.padding(top = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -206,7 +213,7 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
             val all = outline
             when {
                 all == null -> Text("…", color = c.textSecondary, modifier = Modifier.padding(20.dp))
-                all.isEmpty() -> Text("This document has no table of contents.", color = c.textSecondary, fontSize = 15.sp, modifier = Modifier.padding(20.dp))
+                all.isEmpty() -> Text(stringResource(R.string.sheet_no_contents), color = c.textSecondary, fontSize = 15.sp, modifier = Modifier.padding(20.dp))
                 else -> {
                     val level = if (parent < 0) 0u else all[parent].level + 1u
                     val start = parent + 1
@@ -224,7 +231,7 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
                         if (parent >= 0) {
                             item {
                                 Row(Modifier.fillMaxWidth().clickable { parent = parentOf(all, parent) }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(LucideIcons.ArrowLeft, "Up a level", tint = c.icon, modifier = Modifier.size(22.dp))
+                                    Icon(LucideIcons.ArrowLeft, stringResource(R.string.sheet_up_level), tint = c.icon, modifier = Modifier.size(22.dp))
                                     Spacer(Modifier.width(16.dp))
                                     Text(all[parent].title, color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }
@@ -243,7 +250,7 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(e.title, color = c.text, fontSize = 16.sp, modifier = Modifier.weight(1f).padding(vertical = 10.dp), maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                if (e.children > 0u) BarIcon(LucideIcons.ChevronRight, "Expand ${e.title}", { parent = i })
+                                if (e.children > 0u) BarIcon(LucideIcons.ChevronRight, stringResource(R.string.sheet_expand_entry, e.title), { parent = i })
                             }
                         }
                     }
@@ -255,9 +262,9 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
                 Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(LucideIcons.Bookmark, null, tint = c.textSecondary, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.height(12.dp))
-                    Text("Your bookmarks show up here.", color = c.text, fontSize = 15.sp)
+                    Text(stringResource(R.string.sheet_bookmarks_empty), color = c.text, fontSize = 15.sp)
                     Spacer(Modifier.height(16.dp))
-                    Text("Add a bookmark", color = c.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    Text(stringResource(R.string.sheet_add_a_bookmark), color = c.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { vm.toggleBookmark(doc) }.padding(8.dp))
                 }
             } else {
@@ -276,9 +283,9 @@ fun BookmarksSheet(vm: AppViewModel, doc: OpenDocument) {
                             onRename = { renaming = i },
                             onRenamed = { name ->
                                 renaming = null
-                                if (name.isBlank()) vm.tell("That name can't be used.") else vm.bookmarks.rename(doc, b, name.trim())
+                                if (name.isBlank()) vm.tell(text(R.string.sheet_bookmark_name_invalid)) else vm.bookmarks.rename(doc, b, name.trim())
                             },
-                            onDelete = { vm.bookmarks.remove(doc, b); vm.tell("${b.name} bookmark removed") },
+                            onDelete = { vm.bookmarks.remove(doc, b); vm.tell(text(R.string.sheet_bookmark_removed, b.name)) },
                             onDeleteAll = { vm.confirmDeleteAllBookmarks = doc },
                         )
                     }
@@ -320,14 +327,14 @@ private fun UserBookmarkRow(name: String, page: Int, renaming: Boolean, onOpen: 
         } else {
             Column(Modifier.weight(1f)) {
                 Text(name, color = c.text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("Page ${page + 1}", color = c.textSecondary, fontSize = 13.sp)
+                Text(stringResource(R.string.sheet_page, page + 1), color = c.textSecondary, fontSize = 13.sp)
             }
         }
         Box {
             androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = c.menu) {
-                androidx.compose.material3.DropdownMenuItem(text = { Text("Rename", color = c.text) }, onClick = { menu = false; onRename() })
-                androidx.compose.material3.DropdownMenuItem(text = { Text("Delete", color = c.text) }, onClick = { menu = false; onDelete() })
-                androidx.compose.material3.DropdownMenuItem(text = { Text("Delete all", color = c.text) }, onClick = { menu = false; onDeleteAll() })
+                androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.common_rename), color = c.text) }, onClick = { menu = false; onRename() })
+                androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.common_delete), color = c.text) }, onClick = { menu = false; onDelete() })
+                androidx.compose.material3.DropdownMenuItem(text = { Text(stringResource(R.string.sheet_delete_all), color = c.text) }, onClick = { menu = false; onDeleteAll() })
             }
         }
     }
@@ -346,10 +353,10 @@ fun AttachmentsSheet(vm: AppViewModel, doc: OpenDocument) {
         // the reference sets this title up level with the handle and its back arrow below it
         Box(Modifier.fillMaxWidth().height(44.dp)) {
             Text(
-                "Attachments", color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                stringResource(R.string.sheet_attachments), color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.align(Alignment.TopStart).offset(x = 92.dp, y = (-12).dp),
             )
-            BarIcon(LucideIcons.ChevronLeft, "Back", { ctl.sheet = ViewerSheet.More }, modifier = Modifier.align(Alignment.TopStart).offset(x = 3.dp, y = (-5).dp))
+            BarIcon(LucideIcons.ChevronLeft, stringResource(R.string.common_back), { ctl.sheet = ViewerSheet.More }, modifier = Modifier.align(Alignment.TopStart).offset(x = 3.dp, y = (-5).dp))
         }
         LazyColumn {
             items(files) { a ->
@@ -368,9 +375,9 @@ fun AttachmentsSheet(vm: AppViewModel, doc: OpenDocument) {
 }
 
 fun formatSize(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes bytes"
-    bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
-    else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+    bytes < 1024 -> plural(R.plurals.sheet_size_bytes, bytes.toInt(), bytes)
+    bytes < 1024 * 1024 -> text(R.string.sheet_size_kb, bytes / 1024.0)
+    else -> text(R.string.sheet_size_mb, bytes / 1024.0 / 1024.0)
 }
 
 /** `D:20261011143000+02'00'` (or plain text) as a short local date. */
@@ -449,7 +456,7 @@ fun MoreToolsSheet(vm: AppViewModel, doc: OpenDocument) {
             CustomizeToolbar(vm) { customizing = false }
             return@PdfSheet
         }
-        SheetTitle("More tools")
+        SheetTitle(stringResource(R.string.common_tool_more_tools))
         val slots = toolbarSlots(androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp)
         val prefs = vm.quickToolbar
         val tools = prefs.bar.drop(slots) + prefs.grid
@@ -460,7 +467,7 @@ fun MoreToolsSheet(vm: AppViewModel, doc: OpenDocument) {
                 tools.chunked(6).forEach { row ->
                     Row(verticalAlignment = Alignment.Top) {
                         row.forEach { t ->
-                            ToolTile(t.icon, t.title, t.hue, Modifier.width(cell)) {
+                            ToolTile(t.icon, stringResource(t.title), t.hue, Modifier.width(cell)) {
                                 ctl.sheet = ViewerSheet.None
                                 vm.runQuickTool(doc, t)
                             }
@@ -477,7 +484,7 @@ fun MoreToolsSheet(vm: AppViewModel, doc: OpenDocument) {
                 .clickable(role = Role.Button) { customizing = true },
             contentAlignment = Alignment.Center,
         ) {
-            Text("Customize toolbar", color = pdfColors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.sheet_customize_toolbar), color = pdfColors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(16.dp))
     }
