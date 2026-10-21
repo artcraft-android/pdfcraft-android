@@ -1664,7 +1664,6 @@ fn protected_with(alg: pdfcraft_cos::Algorithm, user: &str, permissions: i32) ->
 /// change; that revision is encrypted too, and used to be unreadable without the password,
 /// which made the first signature Invalid. It opens with the document's own key.
 #[test]
-#[ignore = "needs the pdfcraft-cos xref hardening that this workspace does not have yet"]
 fn a_user_password_document_keeps_its_earlier_signature_valid_when_counter_signed() {
     let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
     let id2 = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
@@ -2022,7 +2021,6 @@ fn xref_entry(offset: usize) -> String {
 /// the signed object with itself while the page shows the new one. Such an entry is never a
 /// permitted change.
 #[test]
-#[ignore = "needs the pdfcraft-cos xref hardening that this workspace does not have yet"]
 fn a_cross_reference_entry_the_reader_sets_aside_does_not_hide_new_page_content() {
     let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
     let trust = TrustStore { certs: vec![id.certificate.clone()] };
@@ -2055,7 +2053,6 @@ fn a_cross_reference_entry_the_reader_sets_aside_does_not_hide_new_page_content(
 /// searching the file. What it finds may equal the signed object, yet another reader may search
 /// differently: the object cannot be called unchanged.
 #[test]
-#[ignore = "needs the pdfcraft-cos xref hardening that this workspace does not have yet"]
 fn a_cross_reference_entry_that_misses_its_object_is_not_an_unchanged_object() {
     let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
     let trust = TrustStore { certs: vec![id.certificate.clone()] };
@@ -2063,6 +2060,7 @@ fn a_cross_reference_entry_that_misses_its_object_is_not_an_unchanged_object() {
     // A copy of the signed content, named by an entry two bytes into its `4 0 obj` header.
     let edited = append_content_revision(&signed, "Contract text", |new| format!("4 1\n{}", xref_entry(new + 2)));
     let doc = open(&edited);
+    assert!(!doc.xref_entry_is_exact(4) && doc.xref_entry_is_exact(3));
     let s = signatures(&doc, &edited, &trust).into_iter().find(|s| s.signed).unwrap();
     assert_eq!(s.status, Status::Invalid, "{:?}", s.details);
     assert!(matches!(&s.modification, Modification::Disallowed(k) if k.contains(&"other changes")), "{:?}", s.modification);

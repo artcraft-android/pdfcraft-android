@@ -4109,6 +4109,8 @@ impl Session {
                 let bytes = doc.bytes.clone();
                 doc.display = display_bytes(doc.editor.as_mut(), &bytes, &doc.signatures);
                 doc.renderer = RenderPool::new(doc.display.clone(), render_threads(), doc.config.clone());
+                // Page caches key on the generation; without a new one, old bitmaps can retain the question mark.
+                doc.generation += 1;
             }
         }
     }

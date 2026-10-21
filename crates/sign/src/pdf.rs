@@ -18,8 +18,6 @@ use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, SaveOptions, Strea
 
 use crate::SignError;
 use crate::cms::SignedData;
-#[allow(unused_imports)] // the methods are inherent once pdfcraft-cos has them
-use crate::compat::CosCompat as _;
 use crate::der::Time;
 use crate::keys::DigestAlg;
 use crate::pkcs12::DigitalId;

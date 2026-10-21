@@ -279,3 +279,35 @@ fn signature_contents_stay_unencrypted() {
         assert_eq!(string(2, b"Contents"), b"Private note", "{alg:?}");
     }
 }
+
+#[test]
+fn an_earlier_revision_opens_with_the_documents_own_credentials() {
+    for alg in ALL {
+        let original = protect(alg, "user", "owner", -1);
+        let mut doc = Document::open_with_password(Arc::new(original.clone()), Some("user")).unwrap();
+        let info = doc.trailer().reference(b"Info").unwrap();
+        doc.update_dict(info, |d| d.set(b"Title".to_vec(), Object::String(PdfString::text("Revised")))).unwrap();
+        let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
+        let current = Document::open_with_password(Arc::new(saved), Some("user")).unwrap();
+        assert!(matches!(Document::open(Arc::new(original.clone())), Err(CosError::NeedsPassword)), "{alg:?}");
+        let earlier = current.open_with_same_credentials(Arc::new(original.clone())).unwrap();
+        assert_eq!(content(&earlier), SECRET, "{alg:?}");
+        assert_eq!(title(&earlier).as_deref(), Some("Quarterly numbers"), "{alg:?}");
+        let other = {
+            let mut other = Document::open(Arc::new(fixture())).unwrap();
+            other
+                .set_encryption(&NewEncryption {
+                    algorithm: alg,
+                    user_password: "user",
+                    owner_password: "owner",
+                    permissions: -1,
+                    encrypt_metadata: true,
+                    seed: [3; 32],
+                })
+                .unwrap();
+            write_full(&other, &SaveOptions::default()).unwrap()
+        };
+        assert!(matches!(current.open_with_same_credentials(Arc::new(other)), Err(CosError::NeedsPassword)), "{alg:?}");
+        assert_eq!(content(&current.open_with_same_credentials(Arc::new(fixture())).unwrap()), SECRET, "{alg:?}");
+    }
+}

@@ -105,6 +105,8 @@ pub struct Document {
     entries: Arc<BTreeMap<u32, XrefEntry>>,
     trailer: Dict,
     revisions: Arc<Vec<Revision>>,
+    /// Cross-reference entries the reader set aside; see [`Self::xref_oddities`].
+    xref_oddities: Arc<Vec<(u64, u32)>>,
     repair_log: Arc<Vec<String>>,
     cache: Arc<Mutex<HashMap<u32, Arc<Object>>>>,
     objstms: Arc<Mutex<HashMap<u32, Arc<ObjStm>>>>,
@@ -241,6 +243,13 @@ fn owned_bytes(object: &Object, data: &Arc<Vec<u8>>, depth: usize) -> usize {
     }
 }
 
+/// How an encrypted document is opened: with a password, or with the file key of a document
+/// that has the same encryption (an earlier revision of the same file).
+enum Credentials<'a> {
+    Password(Option<&'a str>),
+    Handler { handler: &'a Arc<pdfcraft_crypt::SecurityHandler>, id0: Vec<u8> },
+}
+
 impl std::fmt::Debug for Document {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Document").field("bytes", &self.data.len()).field("objects", &self.entries.len()).field("edits", &self.overlay.len()).finish()
@@ -257,6 +266,7 @@ impl Document {
             entries: Arc::new(BTreeMap::new()),
             trailer: Dict::new(),
             revisions: Arc::new(Vec::new()),
+            xref_oddities: Arc::default(),
             repair_log: Arc::new(Vec::new()),
             cache: Arc::default(),
             objstms: Arc::default(),
@@ -302,6 +312,21 @@ impl Document {
     /// document is read-only: objects in a larger object stream read as missing, so the
     /// writers refuse to save it ([`CosError::ReadOnlyLimit`]).
     pub fn open_with_stream_limit(data: Arc<Vec<u8>>, password: Option<&str>, stream_limit: usize) -> Result<Self, CosError> {
+        Self::open_as(data, Credentials::Password(password), stream_limit)
+    }
+    /// Open `data`, an earlier revision of this file (the bytes a signature covers) or another
+    /// save of it, with this document's credentials: an encrypted one must have the same
+    /// `/Encrypt` dictionary and `/ID` as this document, whose file key is then reused, so no
+    /// password is needed or kept; unencrypted data opens as [`open`](Self::open) does. Data
+    /// encrypted differently fails with `NeedsPassword`.
+    pub fn open_with_same_credentials(&self, data: Arc<Vec<u8>>) -> Result<Self, CosError> {
+        let credentials = match &self.security {
+            Some(handler) => Credentials::Handler { handler, id0: self.first_id() },
+            None => Credentials::Password(None),
+        };
+        Self::open_as(data, credentials, self.stream_limit)
+    }
+    fn open_as(data: Arc<Vec<u8>>, credentials: Credentials<'_>, stream_limit: usize) -> Result<Self, CosError> {
         // Viewers accept files whose header is missing or damaged as long as the body looks
         // like PDF; so do we (a note goes to the repair log).
         let header = find(&data, b"%PDF-", 0, 1024);
@@ -320,6 +345,7 @@ impl Document {
             entries: Arc::new(BTreeMap::new()),
             trailer: Dict::new(),
             revisions: Arc::new(Vec::new()),
+            xref_oddities: Arc::default(),
             repair_log: Arc::new(Vec::new()),
             cache: Arc::default(),
             objstms: Arc::default(),
@@ -342,14 +368,15 @@ impl Document {
         let parsed = doc.read_xref_chain(&mut log);
         let mut authenticated = false;
         let ok = match parsed {
-            Ok((entries, trailer, revisions)) => {
+            Ok((entries, trailer, revisions, oddities)) => {
                 doc.entries = Arc::new(entries);
                 doc.trailer = trailer;
                 doc.revisions = Arc::new(revisions);
+                doc.xref_oddities = Arc::new(oddities);
                 // Authenticate before checking the catalog: it may sit in an encrypted object
                 // stream, which reads as garbage until the key is known.
                 if let Some(enc) = doc.trailer.get(b"Encrypt").cloned() {
-                    doc.authenticate(&enc, password)?;
+                    doc.authenticate(&enc, &credentials)?;
                     authenticated = true;
                 }
                 doc.root_is_catalog()
@@ -370,7 +397,7 @@ impl Document {
         if (!ok || !authenticated)
             && let Some(enc) = doc.trailer.get(b"Encrypt").cloned()
         {
-            doc.authenticate(&enc, password)?;
+            doc.authenticate(&enc, &credentials)?;
         }
         let max = doc.entries.keys().next_back().copied().unwrap_or(0);
         let size = doc.trailer.int(b"Size").unwrap_or(0).max(0) as u32;
@@ -378,7 +405,7 @@ impl Document {
         Ok(doc)
     }
 
-    fn authenticate(&mut self, enc: &Object, password: Option<&str>) -> Result<(), CosError> {
+    fn authenticate(&mut self, enc: &Object, credentials: &Credentials<'_>) -> Result<(), CosError> {
         // Authentication can change how the same input is decoded.
         self.source_identity = Arc::new(());
         let (num, dict) = match enc {
@@ -396,12 +423,16 @@ impl Document {
         };
         let params = crate::security::encrypt_dict(self, &dict);
         let id0 = self.first_id();
-        let handler = pdfcraft_crypt::SecurityHandler::open(params, &id0, password).map_err(|e| match e {
-            pdfcraft_crypt::CryptError::WrongPassword if password.is_none() => CosError::NeedsPassword,
-            pdfcraft_crypt::CryptError::WrongPassword => CosError::WrongPassword,
-            other => CosError::Security(other.to_string()),
-        })?;
-        self.security = Some(Arc::new(handler));
+        let handler = match credentials {
+            Credentials::Password(password) => Arc::new(pdfcraft_crypt::SecurityHandler::open(params, &id0, *password).map_err(|e| match e {
+                pdfcraft_crypt::CryptError::WrongPassword if password.is_none() => CosError::NeedsPassword,
+                pdfcraft_crypt::CryptError::WrongPassword => CosError::WrongPassword,
+                other => CosError::Security(other.to_string()),
+            })?),
+            Credentials::Handler { handler, id0: known } if *handler.dict() == params && *known == id0 => Arc::clone(handler),
+            Credentials::Handler { .. } => return Err(CosError::NeedsPassword),
+        };
+        self.security = Some(handler);
         self.encrypt_num = num;
         // Objects read while locating the catalog were read before decryption was possible.
         self.cache = Arc::default();
@@ -623,6 +654,23 @@ impl Document {
     /// Where object `num` is stored in the file (ignoring unsaved edits).
     pub fn xref_entry(&self, num: u32) -> Option<XrefEntry> {
         self.entries.get(&num).cloned()
+    }
+    /// Cross-reference entries this reader did not take at face value.
+    pub fn xref_oddities(&self) -> &[(u64, u32)] {
+        &self.xref_oddities
+    }
+    /// Whether the stored cross-reference entry locates the object itself, rather than relying on a search fallback.
+    pub fn xref_entry_is_exact(&self, num: u32) -> bool {
+        match self.xref_entry(num) {
+            None | Some(XrefEntry::Free { .. }) => true,
+            Some(XrefEntry::InFile { offset, .. }) => {
+                let at = |off: usize| matches!(parse_indirect_shared(&self.data, off, &|_| None), Ok((id, _)) if id.num == num);
+                usize::try_from(offset).is_ok_and(|off| at(off) || (self.header_offset != 0 && at(off.saturating_add(self.header_offset))))
+            }
+            Some(XrefEntry::InStream { stream, index }) => {
+                self.objstm(stream).is_ok_and(|stm| usize::try_from(index).ok().and_then(|i| stm.index.get(i)).is_some_and(|(n, _)| *n == num))
+            }
+        }
     }
 
     /// Object `num` has an unsaved edit.
@@ -1020,7 +1068,7 @@ impl Document {
     }
 
     #[allow(clippy::type_complexity)]
-    fn read_xref_chain(&self, log: &mut Vec<String>) -> Result<(BTreeMap<u32, XrefEntry>, Dict, Vec<Revision>), CosError> {
+    fn read_xref_chain(&self, log: &mut Vec<String>) -> Result<(BTreeMap<u32, XrefEntry>, Dict, Vec<Revision>, Vec<(u64, u32)>), CosError> {
         let data = &self.data;
         let tail_start = data.len().saturating_sub(4096);
         let sx = rfind(data, b"startxref", tail_start).ok_or(CosError::Syntax { offset: data.len(), detail: "no startxref".into() })?;
@@ -1032,6 +1080,7 @@ impl Document {
         let mut entries = BTreeMap::new();
         let mut trailer: Option<Dict> = None;
         let mut revisions = Vec::new();
+        let mut oddities = Vec::new();
         let mut visited = HashSet::new();
         let mut next = Some(first);
         while let Some(off) = next.take() {
@@ -1041,12 +1090,14 @@ impl Document {
             }
             // This section's own entries; older sections only fill what newer ones left out.
             let mut sect = BTreeMap::new();
-            let (sect_trailer, is_stream) = match self.read_section(off as usize, &mut sect) {
+            let mut odd = Vec::new();
+            let (sect_trailer, is_stream) = match self.read_section(off as usize, &mut sect, &mut odd) {
                 Ok(v) => v,
                 Err(e) if self.header_offset > 0 => {
                     log.push(format!("xref at {off} unreadable ({e}); retrying relative to the header"));
                     sect.clear();
-                    self.read_section(off as usize + self.header_offset, &mut sect)?
+                    odd.clear();
+                    self.read_section(off as usize + self.header_offset, &mut sect, &mut odd)?
                 }
                 Err(e) => {
                     if revisions.is_empty() {
@@ -1061,17 +1112,22 @@ impl Document {
             // free entries it gives objects only a cross-reference stream can locate.
             if let Some(x) = sect_trailer.int(b"XRefStm").filter(|x| *x >= 0) {
                 let mut stm = BTreeMap::new();
-                match self.read_section(x as usize, &mut stm) {
+                match self.read_section(x as usize, &mut stm, &mut odd) {
                     Ok(_) => {
                         for (num, e) in stm {
-                            if sect.get(&num).is_none_or(|old| matches!(old, XrefEntry::Free { .. })) {
-                                sect.insert(num, e);
+                            match sect.get(&num) {
+                                None | Some(XrefEntry::Free { .. }) => {
+                                    sect.insert(num, e);
+                                }
+                                Some(old) if *old != e => odd.push(num),
+                                Some(_) => {}
                             }
                         }
                     }
                     Err(e) => log.push(format!("hybrid /XRefStm at {x} unreadable: {e}")),
                 }
             }
+            oddities.extend(odd.into_iter().map(|num| (off, num)));
             for (num, e) in sect {
                 entries.entry(num).or_insert(e);
             }
@@ -1085,11 +1141,11 @@ impl Document {
         for k in [&b"Prev"[..], b"XRefStm", b"Type", b"W", b"Index", b"Filter", b"DecodeParms", b"Length"] {
             trailer.remove(k);
         }
-        Ok((entries, trailer, revisions))
+        Ok((entries, trailer, revisions, oddities))
     }
 
     /// Read one section at `off`, adding entries not already known (newer sections win).
-    fn read_section(&self, off: usize, entries: &mut BTreeMap<u32, XrefEntry>) -> Result<(Dict, bool), CosError> {
+    fn read_section(&self, off: usize, entries: &mut BTreeMap<u32, XrefEntry>, odd: &mut Vec<u32>) -> Result<(Dict, bool), CosError> {
         let data = &self.data;
         let mut lx = Lexer::new(data, off);
         if lx.eat_keyword(b"xref") {
@@ -1123,9 +1179,14 @@ impl Document {
                     };
                     // Offset 0 "in use" entries are a known producer bug: ignore them.
                     if matches!(entry, XrefEntry::InFile { offset: 0, .. }) {
+                        if num != 0 {
+                            odd.push(num);
+                        }
                         continue;
                     }
-                    entries.entry(num).or_insert(entry);
+                    if *entries.entry(num).or_insert(entry) != entry {
+                        odd.push(num);
+                    }
                 }
             }
         }
@@ -1179,12 +1240,20 @@ impl Document {
                     0 => XrefEntry::Free { next_generation: b.min(u16::MAX as u64) as u16 },
                     1 => XrefEntry::InFile { offset: a, generation: b.min(u16::MAX as u64) as u16 },
                     2 => XrefEntry::InStream { stream: a.min(u32::MAX as u64) as u32, index: b.min(u32::MAX as u64) as u32 },
-                    _ => continue, // reserved types are treated as null references (§7.5.8.3)
+                    _ => {
+                        odd.push(num);
+                        continue;
+                    }
                 };
                 if matches!(entry, XrefEntry::InFile { offset: 0, .. }) {
+                    if num != 0 {
+                        odd.push(num);
+                    }
                     continue;
                 }
-                entries.entry(num).or_insert(entry);
+                if *entries.entry(num).or_insert(entry) != entry {
+                    odd.push(num);
+                }
             }
         }
         Ok((s.dict.clone(), true))
@@ -1739,5 +1808,33 @@ mod tests {
             let _ = tx.send(());
         });
         rx.recv_timeout(std::time::Duration::from_secs(20)).expect("loading must not retry exponentially");
+    }
+    #[test]
+    fn cross_reference_entries_that_are_set_aside_are_recorded() {
+        let base = build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "(three)"], "/Root 1 0 R");
+        let plain = Document::open(Arc::new(base.clone())).unwrap();
+        assert!(plain.xref_oddities().is_empty());
+        assert!((1..=3).all(|n| plain.xref_entry_is_exact(n)));
+        let prev = String::from_utf8_lossy(&base).rfind("xref\n0 4").unwrap();
+        let third = plain.xref_entry(3).unwrap();
+        let mut bytes = base.clone();
+        let section = bytes.len();
+        bytes.extend_from_slice(format!("xref\n0 1\n0000000000 65535 n \n3 1\n0000000000 00000 n \n2 1\n0000000058 00000 n \n2 1\n0000000009 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R /Prev {prev} >>\nstartxref\n{section}\n%%EOF\n").as_bytes());
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert_eq!(doc.xref_oddities(), [(section as u64, 3), (section as u64, 2)]);
+        assert_eq!(doc.xref_entry(3), Some(third));
+        assert_eq!(doc.xref_entry(2), Some(XrefEntry::InFile { offset: 58, generation: 0 }));
+    }
+
+    #[test]
+    fn an_entry_that_misses_its_object_is_found_by_searching_but_is_not_exact() {
+        let base = build(&["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>", "(three)"], "/Root 1 0 R");
+        let text = String::from_utf8_lossy(&base).into_owned();
+        let at = text.find("3 0 obj").unwrap();
+        let bytes = text.replacen(&format!("{at:010} 00000 n"), &format!("{:010} 00000 n", at + 2), 1).into_bytes();
+        let doc = Document::open(Arc::new(bytes)).unwrap();
+        assert_eq!(doc.get(ObjRef { num: 3, generation: 0 }).as_string().map(|s| s.bytes.clone()), Some(b"three".to_vec()));
+        assert!(!doc.xref_entry_is_exact(3));
+        assert!(doc.xref_entry_is_exact(1) && doc.xref_entry_is_exact(2));
     }
 }

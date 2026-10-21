@@ -1406,6 +1406,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun applyTrust(eng: Engine) {
         val paths = withContext(Dispatchers.IO) { trustedCerts.files().map { it.absolutePath } }
         eng.tool("sign_trust", mapOf("clear" to true, "paths" to paths))
+        // The engine redraws trusted signature appearances under a new generation; refresh the
+        // document so Compose/page caches request the new pixels and signature state.
+        document?.let { refresh(it) }
     }
 
     // ---- Edit PDF ----------------------------------------------------------------------------
