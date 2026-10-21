@@ -1,6 +1,8 @@
 package io.github.artcraftandroid.pdfcraft.engine
 
 import androidx.compose.runtime.mutableStateMapOf
+import io.github.artcraftandroid.pdfcraft.R
+import io.github.artcraftandroid.pdfcraft.text
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,7 +26,7 @@ class UserBookmarks(private val file: File) {
                 for (key in o.keys()) {
                     val a = o.getJSONArray(key)
                     byDoc[key] = (0 until a.length()).mapNotNull { i ->
-                        a.optJSONObject(i)?.let { UserBookmark(it.optString("name", "Page ${it.optInt("page") + 1}"), it.optInt("page")) }
+                        a.optJSONObject(i)?.let { UserBookmark(it.optString("name", text(R.string.files_bookmark_page, it.optInt("page") + 1)), it.optInt("page")) }
                     }
                 }
             }
@@ -44,7 +46,7 @@ class UserBookmarks(private val file: File) {
             save()
             existing to false
         } else {
-            val b = UserBookmark("Page ${page + 1}", page)
+            val b = UserBookmark(text(R.string.files_bookmark_page, page + 1), page)
             byDoc[key] = list + b
             save()
             b to true

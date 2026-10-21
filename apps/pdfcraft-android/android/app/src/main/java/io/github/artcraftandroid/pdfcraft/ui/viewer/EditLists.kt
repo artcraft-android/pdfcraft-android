@@ -1,18 +1,24 @@
 package io.github.artcraftandroid.pdfcraft.ui.viewer
 
+import io.github.artcraftandroid.pdfcraft.R
+import io.github.artcraftandroid.pdfcraft.text as appText
+
 /**
  * Bulleted and numbered lists in Edit PDF: each line of a paragraph (its hard line breaks) becomes
  * an item with a marker in front. The markers are ones the standard PDF fonts carry (a bullet, an
  * en dash, numbers, letters and small roman numerals), so any paragraph can take them.
  */
-enum class ListStyle(val label: String) {
-    None("None"),
+enum class ListStyle(private val sample: String?) {
+    None(null),
     Bullet("•"),
     Dash("–"),
     Number("1."),
     Lower("a."),
     Upper("A."),
     Roman("i.");
+
+    /** What the list panel shows for the style: its first marker, or the word for no list. */
+    val label: String get() = sample ?: appText(R.string.lists_none)
 
     /** The marker of item [n] (0-based). */
     fun marker(n: Int): String = when (this) {

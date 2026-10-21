@@ -19,10 +19,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.CommentInfo
 import io.github.artcraftandroid.pdfcraft.ui.OpenDocument
 import kotlin.math.roundToInt
@@ -56,6 +58,8 @@ fun CommentDragOverlay(
     var shift by remember(c.page, c.index, c.rect) { mutableStateOf(Offset.Zero) }
     var resized by remember(c.page, c.index, c.rect) { mutableStateOf<Rect?>(null) }
     val ppp = doc.viewer.pixelsPerPoint(page).coerceAtLeast(0.01f)
+    val moveLabel = stringResource(R.string.comments_move)
+    val resizeLabel = stringResource(R.string.comments_resize)
 
     // the frame where the comment will go
     Canvas(Modifier.fillMaxSize()) {
@@ -80,7 +84,7 @@ fun CommentDragOverlay(
                     onDragCancel = { shift = Offset.Zero },
                 )
             }
-            .semantics { contentDescription = "Move comment" },
+            .semantics { contentDescription = moveLabel },
     )
     if (c.subtype !in Resizable) return
     // corner handles: drag to resize, the opposite corner staying put
@@ -115,7 +119,7 @@ fun CommentDragOverlay(
                         onDragCancel = { resized = null },
                     )
                 }
-                .semantics { contentDescription = "Resize comment" },
+                .semantics { contentDescription = resizeLabel },
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 drawCircle(Color.White, size.minDimension / 2.6f)

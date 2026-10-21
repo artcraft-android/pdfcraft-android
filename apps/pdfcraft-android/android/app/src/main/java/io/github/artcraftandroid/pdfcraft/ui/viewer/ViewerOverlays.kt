@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -63,6 +64,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.CommentInfo
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
@@ -99,6 +101,7 @@ fun BoxScope.Scrubber(doc: OpenDocument, visible: Boolean, top: Dp, bottom: Dp, 
             val fraction = (v.scrollY / maxScroll).coerceIn(0f, 1f)
             val y = fraction * (track - pillH)
             val label = "${v.currentPage + 1}"
+            val pageOf = stringResource(R.string.viewer_page_of, v.currentPage + 1, doc.pageCount)
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
@@ -122,7 +125,7 @@ fun BoxScope.Scrubber(doc: OpenDocument, visible: Boolean, top: Dp, bottom: Dp, 
                             onDrag()
                         }
                     }
-                    .semantics { contentDescription = "Page ${v.currentPage + 1} of ${doc.pageCount}" },
+                    .semantics { contentDescription = pageOf },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label, color = c.text, fontSize = 15.sp, modifier = Modifier.padding(start = 12.dp, end = 10.dp))
@@ -151,19 +154,19 @@ fun GoToPageDialog(doc: OpenDocument, onDismiss: () -> Unit) {
         doc.viewer.goToPage(n - 1)
         onDismiss()
     }
-    io.github.artcraftandroid.pdfcraft.ui.PdfDialog(onDismiss = onDismiss, title = "Go to page", confirm = "OK", onConfirm = ::go, confirmEnabled = text.isNotEmpty()) {
+    io.github.artcraftandroid.pdfcraft.ui.PdfDialog(onDismiss = onDismiss, title = stringResource(R.string.viewer_go_to_page), confirm = stringResource(R.string.common_ok), onConfirm = ::go, confirmEnabled = text.isNotEmpty()) {
             Column {
-                Text("1 - ${doc.pageCount}", color = c.textSecondary, fontSize = 14.sp)
+                Text(stringResource(R.string.viewer_go_to_page_range, doc.pageCount), color = c.textSecondary, fontSize = 14.sp)
                 Spacer(Modifier.height(10.dp))
                 io.github.artcraftandroid.pdfcraft.ui.PdfField(
-                    text, { text = it.filter(Char::isDigit).take(6); wrong = false }, "Enter page number", error = wrong, focus = focus,
+                    text, { text = it.filter(Char::isDigit).take(6); wrong = false }, stringResource(R.string.viewer_enter_page_number), error = wrong, focus = focus,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = androidx.compose.ui.text.input.ImeAction.Go),
                     keyboardActions = KeyboardActions(onGo = { go() }),
                 )
                 if (previous != null) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "Back to page ${previous + 1}",
+                        stringResource(R.string.viewer_back_to_page, previous + 1),
                         color = c.accent,
                         modifier = Modifier.clickable {
                             doc.viewer.goToPage(previous)
@@ -211,20 +214,20 @@ fun BoxScope.SelectionMenu(vm: AppViewModel, doc: OpenDocument, sel: Selection) 
             .background(c.menu, RoundedCornerShape(4.dp)),
     ) {
         Row(Modifier.fillMaxWidth().height(61.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            MenuIcon(LucideIcons.MessageSquarePlus, "Add comment", allowed) { vm.notePrompt = NotePrompt(doc, null, sel) }
-            MenuIcon(LucideIcons.Highlighter, "Highlight", allowed) { markup(TextMarkup.Highlight) }
-            MenuIcon(LucideIcons.Underline, "Underline", allowed) { markup(TextMarkup.Underline) }
-            MenuIcon(LucideIcons.Strikethrough, "Strikethrough", allowed) { markup(TextMarkup.Strikethrough) }
+            MenuIcon(LucideIcons.MessageSquarePlus, stringResource(R.string.viewer_add_comment), allowed) { vm.notePrompt = NotePrompt(doc, null, sel) }
+            MenuIcon(LucideIcons.Highlighter, stringResource(R.string.common_tool_highlight), allowed) { markup(TextMarkup.Highlight) }
+            MenuIcon(LucideIcons.Underline, stringResource(R.string.common_tool_underline), allowed) { markup(TextMarkup.Underline) }
+            MenuIcon(LucideIcons.Strikethrough, stringResource(R.string.viewer_strikethrough), allowed) { markup(TextMarkup.Strikethrough) }
         }
         // an inset divider, then the rows with 8 dp above and below, as the reference's menu
         Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(1.dp).background(c.divider))
         Spacer(Modifier.height(8.dp))
-        if (doc.writable || doc.source == null) MenuRow(LucideIcons.FilePenLine, "Edit text") {
+        if (doc.writable || doc.source == null) MenuRow(LucideIcons.FilePenLine, stringResource(R.string.viewer_edit_text)) {
             doc.selection.clear()
             vm.enterTool(doc, ViewerTool.Edit)
         }
-        if (doc.info.allowsCopying) MenuRow(LucideIcons.Copy, "Copy text") { vm.copySelection(doc) }
-        MenuRow(LucideIcons.Volume2, "Read aloud") {
+        if (doc.info.allowsCopying) MenuRow(LucideIcons.Copy, stringResource(R.string.viewer_copy_text)) { vm.copySelection(doc) }
+        MenuRow(LucideIcons.Volume2, stringResource(R.string.common_tool_read_aloud)) {
             vm.startReadAloud(doc, fromSelection = true)
             doc.selection.clear()
         }
@@ -258,7 +261,7 @@ private fun MenuRow(icon: ImageVector, label: String, onClick: () -> Unit) {
 fun NoteSheet(vm: AppViewModel, prompt: NotePrompt) {
     val at = prompt.at
     InlineNoteBar(
-        hint = "Write a note",
+        hint = stringResource(R.string.viewer_write_note),
         onDismiss = { vm.notePrompt = null },
         onPost = { vm.postNote(prompt, it) },
         onVoice = if (at != null && prompt.selection == null) ({ vm.notePrompt = null; vm.startVoice(prompt.doc, at) }) else null,
@@ -268,7 +271,7 @@ fun NoteSheet(vm: AppViewModel, prompt: NotePrompt) {
 /** A reply being typed: the same bar, under the comment it answers. */
 @Composable
 fun ReplySheet(vm: AppViewModel, prompt: ReplyPrompt) {
-    InlineNoteBar(hint = "Write a reply", onDismiss = { vm.replyPrompt = null }, onPost = { vm.postReply(prompt, it) }, onVoice = null)
+    InlineNoteBar(hint = stringResource(R.string.viewer_write_reply), onDismiss = { vm.replyPrompt = null }, onPost = { vm.postReply(prompt, it) }, onVoice = null)
 }
 
 /**
@@ -303,11 +306,11 @@ private fun InlineNoteBar(hint: String, onDismiss: () -> Unit, onPost: (String) 
                 },
             )
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (onVoice != null) BarIcon(LucideIcons.Mic, "Record voice comment", { onVoice() }, enabled = text.isBlank())
+                if (onVoice != null) BarIcon(LucideIcons.Mic, stringResource(R.string.voice_record_comment), { onVoice() }, enabled = text.isBlank())
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.width(1.dp).height(21.dp).background(c.divider))
                 Spacer(Modifier.width(4.dp))
-                BarIcon(LucideIcons.Send, "Post", { onPost(text) }, enabled = text.isNotBlank(), tint = c.toolAccent)
+                BarIcon(LucideIcons.Send, stringResource(R.string.common_post), { onPost(text) }, enabled = text.isNotBlank(), tint = c.toolAccent)
             }
         }
     }
@@ -327,6 +330,7 @@ fun BoxScope.TextEntry(vm: AppViewModel, prompt: TextPrompt, onDone: (TextPrompt
     val sizeSp = with(density) { (vm.toolPrefs.textSize * doc.viewer.pixelsPerPoint(prompt.at.page)).toSp() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val currentText = androidx.compose.runtime.rememberUpdatedState(text)
+    val placeholder = stringResource(R.string.viewer_add_text)
     // leaving the tool (Done) places the text too, after whatever else the tool had pending
     androidx.compose.runtime.DisposableEffect(prompt) {
         val before = doc.commitTool
@@ -358,7 +362,7 @@ fun BoxScope.TextEntry(vm: AppViewModel, prompt: TextPrompt, onDone: (TextPrompt
                 .focusRequester(focus),
             decorationBox = { inner ->
                 Box {
-                    if (text.isEmpty()) Text("Add text", color = color.copy(alpha = 0.5f), fontSize = sizeSp)
+                    if (text.isEmpty()) Text(placeholder, color = color.copy(alpha = 0.5f), fontSize = sizeSp)
                     inner()
                 }
             },
@@ -383,6 +387,8 @@ fun BoxScope.SelectionHandles(doc: OpenDocument, sel: Selection) {
     val size = with(density) { 20.dp.toPx() }
     // the reference's handles: 20 dp drops in one blue in both themes
     val blue = Color(0xFF4285F4)
+    val startLabel = stringResource(R.string.viewer_selection_start)
+    val endLabel = stringResource(R.string.viewer_selection_end)
     for (start in listOf(true, false)) {
         val r = (if (start) sel.startRect else sel.endRect) ?: continue
         // the handle hangs from the line's bottom, at its outer edge
@@ -406,7 +412,7 @@ fun BoxScope.SelectionHandles(doc: OpenDocument, sel: Selection) {
                         doc.viewer.screenToPage(target, nearest = true)?.let { doc.selection.dragHandle(start, it) }
                     }
                 }
-                .semantics { contentDescription = if (start) "Selection start" else "Selection end" },
+                .semantics { contentDescription = if (start) startLabel else endLabel },
         ) {
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                 val rad = this.size.width / 2f
@@ -432,6 +438,7 @@ fun BoxScope.HorizontalScrubber(doc: OpenDocument, visible: Boolean, bottom: Dp,
             val pillW = with(density) { 48.dp.toPx() }
             val n = (doc.pageCount - 1).coerceAtLeast(1)
             val x = if (dragging) dragX else v.currentPage.toFloat() / n * (track - pillW)
+            val pageOf = stringResource(R.string.viewer_page_of, v.currentPage + 1, doc.pageCount)
             Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(2.dp).background(c.divider))
             Box(
                 Modifier
@@ -453,7 +460,7 @@ fun BoxScope.HorizontalScrubber(doc: OpenDocument, visible: Boolean, bottom: Dp,
                             onDrag()
                         }
                     }
-                    .semantics { contentDescription = "Page ${v.currentPage + 1} of ${doc.pageCount}" },
+                    .semantics { contentDescription = pageOf },
                 contentAlignment = Alignment.Center,
             ) {
                 Text("${v.currentPage + 1}", color = c.text, fontSize = 15.sp)

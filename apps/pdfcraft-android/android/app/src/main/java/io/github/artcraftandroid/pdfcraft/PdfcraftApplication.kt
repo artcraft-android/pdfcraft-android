@@ -16,6 +16,11 @@ class PdfcraftApplication : Application() {
     /** The engine, loaded once per process on a background thread and shared by the activities. */
     val engine: Deferred<Result<Engine>> by lazy { scope.async { runCatching { Engine.open() } } }
 
+    override fun onCreate() {
+        super.onCreate()
+        initText(this)
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)

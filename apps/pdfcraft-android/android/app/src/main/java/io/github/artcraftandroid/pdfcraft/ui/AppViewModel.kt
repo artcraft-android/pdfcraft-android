@@ -33,6 +33,9 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.artcraftandroid.pdfcraft.PdfcraftApplication
+import io.github.artcraftandroid.pdfcraft.R
+import io.github.artcraftandroid.pdfcraft.plural
+import io.github.artcraftandroid.pdfcraft.text
 import io.github.artcraftandroid.pdfcraft.core.MobileException
 import io.github.artcraftandroid.pdfcraft.engine.DocumentFiles
 import io.github.artcraftandroid.pdfcraft.engine.Engine
@@ -115,7 +118,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         settingsOpen = false
         showLicences = false
         viewModelScope.launch {
-            val eng = engine ?: application.engine.await().getOrNull() ?: run { tell(engineProblem ?: "PdfCraft couldn't start."); return@launch }
+            val eng = engine ?: application.engine.await().getOrNull() ?: run { tell(engineProblem ?: text(R.string.msg_engine_not_started)); return@launch }
             opening = true
             try {
                 val file = withContext(Dispatchers.IO) {
@@ -127,7 +130,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // moved or deleted since it was opened: it leaves Recent
                 withContext(Dispatchers.IO) { recents.remove(setOf(uri.toString())) }
                 refreshRecents()
-                tell("This file has been moved or deleted.")
+                tell(text(R.string.msg_file_moved))
             } catch (e: SecurityException) {
                 // A file another app lent for one visit (Files, Downloads: "Open with"): Android
                 // takes that access back later, so Recent can't read it again. PdfCraft's own copy
@@ -136,9 +139,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val copy = withContext(Dispatchers.IO) { files.existingCopy(uri) }
                 if (copy != null) {
                     openFile(eng, uri, copy, password)
-                    tell("Opened PdfCraft's copy. To change the original, open it again from the app it's in.")
+                    tell(text(R.string.msg_opened_own_copy))
                 } else {
-                    tell("PdfCraft can't open this file any more. Open it again from the app it's in, or with Open file.")
+                    tell(text(R.string.msg_file_access_lost))
                 }
             } catch (e: Exception) {
                 tell(e.userMessage)
@@ -369,13 +372,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun undo(doc: OpenDocument) {
         doc.localUndo?.let { it.undo(); return }
         val label = doc.info.undo ?: return
-        runTool(doc, "edit_undo") { tell("$label undone") }
+        runTool(doc, "edit_undo") { tell(text(R.string.msg_undone, label)) }
     }
 
     fun redo(doc: OpenDocument) {
         doc.localUndo?.let { it.redo(); return }
         val label = doc.info.redo ?: return
-        runTool(doc, "edit_redo") { tell("$label redone") }
+        runTool(doc, "edit_redo") { tell(text(R.string.msg_redone, label)) }
     }
 
     /** Switch the viewer to [tool], unless the document forbids what it does. */
@@ -398,13 +401,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ViewerTool.None -> false
         }
         if (blocked) {
-            tell(info.readOnlyReason ?: "This tool is not available due to the document's security settings.")
+            tell(info.readOnlyReason ?: text(R.string.msg_tool_blocked_security))
             return
         }
         if (ctl.tool != ViewerTool.None) leaveTool(doc)
         doc.selection.clear()
         ctl.switchTool(tool)
-        if (tool == ViewerTool.Draw && toolPrefs.snapToShape && toolPrefs.takeSnapHint()) tell("Snap to shape on")
+        if (tool == ViewerTool.Draw && toolPrefs.snapToShape && toolPrefs.takeSnapHint()) tell(text(R.string.msg_snap_to_shape_on))
         // the first time the reader comments without a name, ask for one (once)
         if (tool in setOf(ViewerTool.Comment, ViewerTool.Markup, ViewerTool.Draw, ViewerTool.Text) && toolPrefs.author.isBlank() && !toolPrefs.authorAsked) {
             toolPrefs.authorAsked = true
@@ -481,9 +484,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     runCatching { withContext(eng.commands) { eng.session.glyphCount(doc.id, p.toUInt()) } }.getOrDefault(1u) == 0u
                 }
                 if (textless) {
-                    tell("This file's words are pictures, so they can't be searched yet.", "Recognize text") { recognizeText(doc) }
+                    tell(text(R.string.msg_search_image_only), text(R.string.common_tool_recognize_text)) { recognizeText(doc) }
                 } else {
-                    tell("No matches for “${doc.search.query}”")
+                    tell(text(R.string.msg_search_no_matches, doc.search.query))
                 }
             }
         }
@@ -497,7 +500,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val send = Intent(Intent.ACTION_SEND)
                 .setType("application/pdf")
                 .putExtra(Intent.EXTRA_STREAM, uri)
-                .putExtra(Intent.EXTRA_SUBJECT, "Emailing ${doc.title}")
+                .putExtra(Intent.EXTRA_SUBJECT, text(R.string.msg_share_subject, doc.title))
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intents.trySend(Intent.createChooser(send, null))
         }
@@ -532,7 +535,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Print [doc] through Android's print framework. */
     fun print(doc: OpenDocument) {
         if (!doc.info.allowsPrinting) {
-            tell("Print unavailable: the author has disabled printing for this document.")
+            tell(text(R.string.msg_print_disabled))
             return
         }
         viewModelScope.launch {
@@ -585,7 +588,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (doc.info.dirty) engine?.tool("doc_save", mapOf("doc" to doc.id))
                 withContext(Dispatchers.IO) { files.writeBack(doc.file, target) }
                 refresh(doc)
-                tell("Saved a copy")
+                tell(text(R.string.msg_saved_copy))
                 then?.invoke()
             } catch (e: Exception) {
                 tell(e.userMessage)
@@ -623,7 +626,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startReadAloud(doc: OpenDocument, fromSelection: Boolean = false) {
         if (doc.info.encrypted) {
-            tell("Read aloud isn't available for password-protected documents.")
+            tell(text(R.string.msg_read_aloud_encrypted))
             return
         }
         readAloud?.stop()
@@ -638,7 +641,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val saved = ReadAloud.savedPosition(getApplication(), key)?.takeIf { it.first in 0 until doc.pageCount }
         if (saved != null) {
             readAloud = ReadAloud(getApplication(), eng, doc, viewModelScope, saved.first, { readAloud = null }, key, resumeAt = saved.second to saved.third)
-            tell("Reading on from where you stopped", "Start over") {
+            tell(text(R.string.msg_read_aloud_resumed), text(R.string.msg_read_aloud_start_over)) {
                 ReadAloud.forgetPosition(getApplication(), key)
                 readAloud?.stop()
                 ReadAloud.forgetPosition(getApplication(), key)
@@ -696,7 +699,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Add a bookmark on the current page, or remove the one there. */
     fun toggleBookmark(doc: OpenDocument) {
         val (b, added) = bookmarkStore.toggle(docKey(doc), doc.viewer.currentPage)
-        tell("${b.name} bookmark ${if (added) "added" else "removed"}")
+        tell(text(if (added) R.string.msg_bookmark_added else R.string.msg_bookmark_removed, b.name))
     }
 
     /** Delete all bookmarks of a document: waiting for confirmation. */
@@ -704,7 +707,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteAllBookmarks(doc: OpenDocument) {
         bookmarks.clear(doc)
-        tell("Bookmarks cleared")
+        tell(text(R.string.msg_bookmarks_cleared))
     }
 
     fun isStarred(doc: OpenDocument): Boolean = recentList.firstOrNull { it.uri == docKey(doc) }?.starred == true
@@ -899,7 +902,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun startVoice(doc: OpenDocument, at: PagePoint) {
         val app = getApplication<Application>()
         if (app.cacheDir.usableSpace < 60L * 1024 * 1024) {
-            tell("Not enough free storage to record. Free up some space and try again.")
+            tell(text(R.string.msg_voice_no_storage))
             return
         }
         val prompt = VoicePrompt(doc, at)
@@ -915,7 +918,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun onMicPermission(granted: Boolean) {
         val p = pendingVoice
         pendingVoice = null
-        if (granted && p != null) voicePrompt = p else if (!granted) tell("Voice comments need access to the microphone.")
+        if (granted && p != null) voicePrompt = p else if (!granted) tell(text(R.string.msg_voice_no_mic))
     }
 
     fun dismissMicRationale(openSettings: Boolean) {
@@ -961,22 +964,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Put [text] on the clipboard (Android 13 and later confirm it themselves). */
     fun copyText(text: String) {
         val cm = getApplication<Application>().getSystemService(android.content.ClipboardManager::class.java)
-        cm?.setPrimaryClip(android.content.ClipData.newPlainText("Comment", text))
-        if (android.os.Build.VERSION.SDK_INT < 33) tell("Copied")
+        // the parameter `text` hides the text() function here: called by its full name
+        cm?.setPrimaryClip(android.content.ClipData.newPlainText(io.github.artcraftandroid.pdfcraft.text(R.string.msg_clip_comment), text))
+        if (android.os.Build.VERSION.SDK_INT < 33) tell(io.github.artcraftandroid.pdfcraft.text(R.string.msg_copied))
     }
 
     /** Copy the selected text (when the document allows copying). */
     fun copySelection(doc: OpenDocument) {
         if (!doc.info.allowsCopying) {
-            tell("This document doesn't allow copying its text.")
+            tell(text(R.string.msg_copy_not_allowed))
             return
         }
         viewModelScope.launch {
             val text = doc.selection.text() ?: return@launch
             val cm = getApplication<Application>().getSystemService(android.content.ClipboardManager::class.java)
-            cm?.setPrimaryClip(android.content.ClipData.newPlainText("PDF text", text))
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText(io.github.artcraftandroid.pdfcraft.text(R.string.msg_clip_pdf_text), text))
             doc.selection.clear()
-            if (android.os.Build.VERSION.SDK_INT < 33) tell("Copied")
+            if (android.os.Build.VERSION.SDK_INT < 33) tell(io.github.artcraftandroid.pdfcraft.text(R.string.msg_copied))
         }
     }
 
@@ -1007,24 +1011,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun recognizeText(doc: OpenDocument) {
         val eng = engine ?: return
         viewModelScope.launch {
-            busy = "Preparing text recognition…"
+            busy = text(R.string.msg_busy_preparing_ocr)
             withContext(Dispatchers.IO) { runCatching { eng.prepareOcrModels(getApplication()) } }
             busy = null
             val status = runCatching { eng.tool("ocr_status") }.getOrNull()
             if (status?.optBoolean("available", false) != true) {
-                tell("Text recognition isn't installed in this build.")
+                tell(text(R.string.msg_ocr_not_installed))
                 return@launch
             }
-            busy = "Recognizing text…"
+            busy = text(R.string.msg_busy_recognizing)
             try {
                 val r = eng.tool("ocr_recognize", mapOf("doc" to doc.id))
                 refresh(doc)
                 val pages = r.optJSONArray("pages")
                 val n = (0 until (pages?.length() ?: 0)).count { pages?.optJSONObject(it)?.has("skipped") == false }
                 if (n > 0) {
-                    success = SuccessBanner("Text recognized (English). It can now be selected, copied, searched and highlighted.") { undo(doc) }
+                    success = SuccessBanner(text(R.string.msg_ocr_done)) { undo(doc) }
                 } else {
-                    tell("No pages needed recognizing")
+                    tell(text(R.string.msg_ocr_nothing))
                 }
             } catch (e: MobileException) {
                 tell(e.userMessage)
@@ -1121,7 +1125,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     "at" to listOf(at.x.toDouble(), at.y.toDouble()), "path" to target.absolutePath, "author" to author,
                 ))
             } else {
-                tell("Tap where you want to place your ${if (pad.initials) "initials" else "signature"}")
+                tell(text(if (pad.initials) R.string.msg_place_initials else R.string.msg_place_signature))
             }
         }
     }
@@ -1149,7 +1153,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     bmp
                 }.getOrNull()
             }
-            if (importedSignature == null) tell("That image couldn't be read.")
+            if (importedSignature == null) tell(text(R.string.msg_image_unreadable))
         }
     }
 
@@ -1186,7 +1190,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Draw the box for a new digital signature on [doc], in Fill & Sign. */
     fun startCertPlacing(doc: OpenDocument) {
         if (!doc.info.readOnlyReason.isNullOrEmpty()) {
-            tell("This document can't be changed, so it can't be signed.")
+            tell(text(R.string.msg_sign_read_only))
             return
         }
         if (doc.controller.tool != ViewerTool.FillSign) enterTool(doc, ViewerTool.FillSign)
@@ -1237,18 +1241,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val problem = info.problem
                 if (problem != null) {
                     imp.file.delete()
-                    tell("This digital ID can't sign documents. $problem")
+                    tell(text(R.string.msg_id_cannot_sign, problem))
                     return@launch
                 }
                 val id = withContext(Dispatchers.IO) { digitalIds.add(imp.file, info) }
                 imp.file.delete()
                 chosenId = id
-                tell("Added ${id.name}'s digital ID")
+                tell(text(R.string.msg_id_added, id.name))
             } catch (e: MobileException.WrongPassword) {
                 idImport = io.github.artcraftandroid.pdfcraft.ui.viewer.IdImport(imp.file, imp.name, wrong = true)
             } catch (e: MobileException) {
                 imp.file.delete()
-                tell("PdfCraft can't use this file as a digital ID: ${e.userMessage}")
+                tell(text(R.string.msg_id_unusable, e.userMessage))
             }
         }
     }
@@ -1257,7 +1261,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun createDigitalId(name: String, email: String, organization: String, password: String) {
         val eng = engine ?: return
         viewModelScope.launch {
-            busy = "Creating your digital ID…"
+            busy = text(R.string.msg_busy_creating_id)
             val tmp = File(getApplication<Application>().cacheDir, "new-id-${System.nanoTime()}.p12")
             try {
                 eng.tool("sign_id_create", mapOf(
@@ -1267,7 +1271,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val info = withContext(Dispatchers.IO) { io.github.artcraftandroid.pdfcraft.core.digitalIdInfo(tmp.absolutePath, password) }
                 chosenId = withContext(Dispatchers.IO) { digitalIds.add(tmp, info) }
                 idCreate = false
-                tell("Digital ID created")
+                tell(text(R.string.msg_id_created))
             } catch (e: MobileException) {
                 tell(toolMessage(e, "sign_id_create"))
             } finally {
@@ -1297,7 +1301,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val eng = engine ?: return
         val doc = t.doc
         viewModelScope.launch {
-            busy = "Signing…"
+            busy = text(R.string.msg_busy_signing)
             try {
                 val args = mutableMapOf<String, Any?>(
                     "doc" to doc.id, "id" to id.file.absolutePath, "password" to password, "out" to doc.file.absolutePath,
@@ -1322,13 +1326,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // the working copy is signed; the original gets it now, or a copy does
                 doc.notWrittenBack = true
                 if (save(doc, quiet = true)) {
-                    tell("Signed and saved")
+                    tell(text(R.string.msg_signed_saved))
                 } else {
-                    tell("Signed, but ${doc.name} can't be changed where it is. Save a copy to keep the signed file.", "Save a copy") { saveCopyAs(doc) }
+                    tell(text(R.string.msg_signed_not_saved, doc.name), text(R.string.common_save_copy)) { saveCopyAs(doc) }
                 }
             } catch (e: MobileException) {
                 val m = toolMessage(e, "sign_document")
-                certSignError = if (m.contains("password is incorrect", ignoreCase = true)) "The password is incorrect." else m
+                certSignError = if (m.contains("password is incorrect", ignoreCase = true)) text(R.string.common_wrong_password) else m
             } finally {
                 busy = null
             }
@@ -1337,7 +1341,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A tool's refusal without the tool's name in front, as a sentence. */
     private fun toolMessage(e: Throwable, tool: String): String =
-        e.userMessage.removePrefix("$tool: ").replaceFirstChar { it.uppercase() }.let { if (it.endsWith(".")) it else "$it." }
+        e.userMessage.removePrefix("$tool: ").replaceFirstChar { it.uppercase() }.let { if (it.lastOrNull()?.isLetterOrDigit() == true) "$it." else it }
 
     /** What the document's signatures say (only asked for when it has signatures or signature fields). */
     private suspend fun loadSignatures(eng: Engine, doc: OpenDocument) {
@@ -1353,13 +1357,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val signed = doc.signatures.filter { it.signed }
         if (signed.isEmpty()) return
         val one = signed.singleOrNull()
+        // the local `text` hides the text() function here: called by its full name
         val text = when {
-            signed.any { it.status == "invalid" } -> if (one != null) "This document's signature is invalid." else "At least one signature in this document is invalid."
-            signed.all { it.status == "valid" } -> if (one != null) "Signed by ${one.signer ?: "an unknown signer"}. The signature is valid." else "All ${signed.size} signatures are valid."
-            one != null -> "Signed by ${one.signer ?: "an unknown signer"}. The document hasn't changed since, but the signer isn't verified."
-            else -> "Signed. Some of the signers aren't verified."
+            signed.any { it.status == "invalid" } -> io.github.artcraftandroid.pdfcraft.text(if (one != null) R.string.msg_sig_invalid else R.string.msg_sig_some_invalid)
+            signed.all { it.status == "valid" } -> if (one != null) {
+                one.signer?.let { io.github.artcraftandroid.pdfcraft.text(R.string.msg_sig_valid, it) } ?: io.github.artcraftandroid.pdfcraft.text(R.string.msg_sig_valid_unknown)
+            } else {
+                plural(R.plurals.msg_sig_all_valid, signed.size, signed.size)
+            }
+            one != null -> one.signer?.let { io.github.artcraftandroid.pdfcraft.text(R.string.msg_sig_unverified, it) } ?: io.github.artcraftandroid.pdfcraft.text(R.string.msg_sig_unverified_unknown)
+            else -> io.github.artcraftandroid.pdfcraft.text(R.string.msg_sig_some_unverified)
         }
-        tell(text, "Details") { doc.controller.sheet = io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerSheet.Signatures }
+        tell(text, io.github.artcraftandroid.pdfcraft.text(R.string.msg_sig_details)) { doc.controller.sheet = io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerSheet.Signatures }
     }
 
     /** Show signature [s] on its page, flashing its box. */
@@ -1385,7 +1394,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { trustedCerts.add(der, sha) }
                 applyTrust(eng)
                 loadSignatures(eng, doc)
-                tell("${s.signer ?: "This signer"} is trusted on this device")
+                tell(s.signer?.let { text(R.string.msg_signer_trusted, it) } ?: text(R.string.msg_signer_trusted_unknown))
             } catch (e: MobileException) {
                 tell(e.userMessage)
             }
@@ -1670,12 +1679,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val f = File(getApplication<Application>().cacheDir, "image-${System.nanoTime()}-${name}")
                 withContext(Dispatchers.IO) {
                     getApplication<Application>().contentResolver.openInputStream(uri).use { input ->
-                        requireNotNull(input) { "The picture couldn't be read." }
+                        requireNotNull(input) { text(R.string.msg_picture_unreadable) }
                         f.outputStream().use { input.copyTo(it) }
                     }
                 }
                 if (name.lowercase().endsWith(".gif")) {
-                    tell("GIF images can't be added.")
+                    tell(text(R.string.msg_gif_not_supported))
                     return@launch
                 }
                 val eng = engine ?: return@launch
@@ -1724,7 +1733,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } ?: return false
         if (w.readOnly) return true
         if (!doc.info.allowsFormFilling) {
-            tell("This tool is not available due to the document's security settings.")
+            tell(text(R.string.msg_tool_blocked_security))
             return true
         }
         when (w.kind) {
@@ -1760,12 +1769,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             when {
                 act.has("reset") -> {
                     val names = act.optJSONArray("reset")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
-                    runTool(doc, "form_reset", if (names.isEmpty()) emptyMap() else mapOf("fields" to names)) { tell("Form cleared") }
+                    runTool(doc, "form_reset", if (names.isEmpty()) emptyMap() else mapOf("fields" to names)) { tell(text(R.string.msg_form_cleared)) }
                 }
                 act.has("url") -> linkPrompt = act.optString("url")
                 act.has("page") -> doc.viewer.goToPage((act.optInt("page") - 1).coerceIn(0, doc.pageCount - 1))
-                act.has("submit") -> tell("This button sends the form online, which PdfCraft doesn't do.")
-                act.has("javascript") -> tell("This button runs a script, which PdfCraft doesn't run.")
+                act.has("submit") -> tell(text(R.string.msg_button_submit))
+                act.has("javascript") -> tell(text(R.string.msg_button_script))
             }
         }
     }
@@ -1834,7 +1843,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             FilePickKind.DigitalId -> viewModelScope.launch {
                 val uri = uris.first()
                 val picked = withContext(Dispatchers.IO) { runCatching { copyIn(uri) }.getOrNull() }
-                if (picked == null) tell("That file couldn't be read.")
+                if (picked == null) tell(text(R.string.msg_that_file_unreadable))
                 else idImport = io.github.artcraftandroid.pdfcraft.ui.viewer.IdImport(picked, picked.name, wrong = false)
             }
         }
@@ -1850,7 +1859,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val dir = File(getApplication<Application>().cacheDir, "picked/${System.nanoTime()}").apply { mkdirs() }
         val out = File(dir, files.displayNameRaw(uri))
         getApplication<Application>().contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "${out.name} couldn't be read." }
+            requireNotNull(input) { text(R.string.msg_named_file_unreadable, out.name) }
             out.outputStream().use { input.copyTo(it) }
         }
         return out
@@ -1875,9 +1884,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun deliver(file: File, name: String, mime: String = "application/pdf") {
         val uri = withContext(Dispatchers.IO) { files.saveToDownloads(file, name, mime).also { file.delete() } }
         val size = withContext(Dispatchers.IO) { files.size(uri) }
-        val sizeText = size?.let { " (${io.github.artcraftandroid.pdfcraft.ui.viewer.formatSize(it)})" } ?: ""
-        if (mime == "application/pdf") tell("Saved as $name in Downloads$sizeText", "Open") { open(uri) }
-        else tell("Saved as $name in Downloads$sizeText", "Open") {
+        val saved = size?.let { text(R.string.msg_saved_downloads_size, name, io.github.artcraftandroid.pdfcraft.ui.viewer.formatSize(it)) } ?: text(R.string.msg_saved_downloads, name)
+        if (mime == "application/pdf") tell(saved, text(R.string.common_open)) { open(uri) }
+        else tell(saved, text(R.string.common_open)) {
             intents.trySend(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null))
         }
     }
@@ -1885,7 +1894,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun tempFile(ext: String) = File(getApplication<Application>().cacheDir, "out-${System.nanoTime()}.$ext")
 
     /** Compress PDF at [level] (0 high, 1 medium, 2 low compression). */
-    fun compress(doc: OpenDocument, level: Int) = job("Compressing…") { eng ->
+    fun compress(doc: OpenDocument, level: Int) = job(text(R.string.msg_busy_compressing)) { eng ->
         val (ppi, above, quality) = when (level) {
             0 -> Triple(72, 108, 40)
             2 -> Triple(300, 450, 80)
@@ -1901,14 +1910,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (out.length() >= doc.info.fileSize.toLong()) {
             // as the reference: nothing is saved when the file can't get any smaller
             out.delete()
-            tell("This file is already as small as it can be.")
+            tell(text(R.string.msg_compress_no_gain))
             return@job
         }
         deliver(out, "${doc.title}_compressed.pdf")
     }
 
     /** Combine the gathered files, in order, into [name].pdf. */
-    fun combine(name: String) = job("Combining…") { eng ->
+    fun combine(name: String) = job(text(R.string.msg_busy_combining)) { eng ->
         val paths = withContext(Dispatchers.IO) { combineFiles.map { copyIn(it.uri).absolutePath } }
         val out = tempFile("pdf")
         eng.tool("doc_combine", mapOf("paths" to paths, "out" to out.absolutePath))
@@ -1921,7 +1930,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * A protected copy of [doc] with [password] as its open password. The copy is made from a
      * second, temporary engine document, so the open one keeps its file and history.
      */
-    fun protect(doc: OpenDocument, password: String) = job("Setting password…") { eng ->
+    fun protect(doc: OpenDocument, password: String) = job(text(R.string.msg_busy_setting_password)) { eng ->
         save(doc)
         val out = tempFile("pdf")
         val copy = eng.tool("doc_open", mapOf("path" to doc.file.absolutePath, "password" to doc.password)).optLong("doc")
@@ -1941,12 +1950,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (page != null) args["pages"] = listOf(page + 1)
         runTool(doc, "page_set_box", args) {
             toolScreen = null
-            tell(if (page == null) "Every page is cropped." else "The page is cropped.")
+            tell(text(if (page == null) R.string.msg_crop_all else R.string.msg_crop_page))
         }
     }
 
     /** Export [doc] as a Word, RTF, Excel or PowerPoint document. */
-    fun exportDocument(doc: OpenDocument, ext: String) = job("Exporting to ${ext.uppercase()}…") { eng ->
+    fun exportDocument(doc: OpenDocument, ext: String) = job(text(R.string.msg_busy_exporting_to, ext.uppercase())) { eng ->
         val out = tempFile(ext)
         eng.tool("doc_export_office", mapOf("doc" to doc.id, "path" to out.absolutePath))
         toolScreen = null
@@ -1977,11 +1986,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Pictures of [pages] (0-based) at 200 dpi, saved to Pictures/PdfCraft or handed to the share sheet. */
-    fun writeImages(doc: OpenDocument, ext: String, pages: List<Int>, share: Boolean) = job("Exporting images…") { eng ->
+    fun writeImages(doc: OpenDocument, ext: String, pages: List<Int>, share: Boolean) = job(text(R.string.msg_busy_exporting_images)) { eng ->
         val mime = if (ext == "png") "image/png" else "image/jpeg"
         val made = mutableListOf<Pair<File, String>>()
         for ((n, i) in pages.withIndex()) {
-            busy = "Exporting page ${n + 1} of ${pages.size}…"
+            busy = text(R.string.msg_busy_exporting_page, n + 1, pages.size)
             val img = withContext(eng.renders) { eng.session.renderPage(doc.id, i.toUInt(), 200f / 72f, null) }
             val out = tempFile(ext)
             withContext(Dispatchers.IO) {
@@ -2015,26 +2024,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     f.delete()
                 }
             }
-            tell(if (made.size == 1) "1 image saved to Pictures/PdfCraft" else "${made.size} images saved to Pictures/PdfCraft")
+            tell(plural(R.plurals.msg_images_saved, made.size, made.size))
         }
     }
 
     /** Create PDF from picked files (images, text, Office documents, PDFs), combined in order, then open it. */
-    private fun createFrom(picked: List<Uri>) = job("Creating PDF…") { eng ->
+    private fun createFrom(picked: List<Uri>) = job(text(R.string.msg_busy_creating_pdf)) { eng ->
         // at most 12 files at once, as the reference allows
-        if (picked.size > MAX_CREATE_FILES) tell("Only the first $MAX_CREATE_FILES files were used.")
+        if (picked.size > MAX_CREATE_FILES) tell(plural(R.plurals.msg_create_first_files, MAX_CREATE_FILES, MAX_CREATE_FILES))
         val uris = picked.take(MAX_CREATE_FILES)
         val paths = withContext(Dispatchers.IO) { uris.map { copyIn(it).absolutePath } }
         val out = tempFile("pdf")
         eng.tool("doc_create_multiple", mapOf("paths" to paths, "out" to out.absolutePath, "mode" to "combine"))
         val name = files.displayNameRaw(uris.first()).substringBeforeLast('.') + ".pdf"
         val uri = withContext(Dispatchers.IO) { files.saveToDownloads(out, DocumentFiles.safeName(name)).also { out.delete() } }
-        tell("Saved as $name in Downloads")
+        tell(text(R.string.msg_saved_downloads, name))
         open(uri)
     }
 
     /** Pages [pages] (0-based) of [doc] as a new PDF in Downloads. */
-    fun extractPages(doc: OpenDocument, pages: List<Int>) = job("Extracting…") { eng ->
+    fun extractPages(doc: OpenDocument, pages: List<Int>) = job(text(R.string.msg_busy_extracting)) { eng ->
         val out = tempFile("pdf")
         eng.tool("page_extract", mapOf("doc" to doc.id, "pages" to pages.map { it + 1 }, "out" to out.absolutePath))
         deliver(out, "Pages from ${doc.title}.pdf")
@@ -2125,7 +2134,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Save the scanned pages as a PDF with [filter]'s look (or insert them where Organize asked). */
-    fun saveScan(filter: ScanFilter) = job("Saving scan…") { eng ->
+    fun saveScan(filter: ScanFilter) = job(text(R.string.msg_busy_saving_scan)) { eng ->
         val pages = scanPages.toList()
         val paths = pages.map { it.file.absolutePath }
         val created = eng.tool("doc_create", mapOf("from" to "images", "paths" to paths, "name" to "Scan"))
@@ -2139,13 +2148,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val size = sizes?.optJSONObject(i) ?: continue
                 val (w, h) = size.optDouble("width") to size.optDouble("height")
                 val corners = page.corners.mapIndexed { k, v -> v * if (k % 2 == 0) w else h }
-                busy = "Cleaning up page ${i + 1} of ${pages.size}…"
+                busy = text(R.string.msg_busy_cleaning_page, i + 1, pages.size)
                 runCatching { eng.tool("page_enhance_camera", mapOf("doc" to id, "page" to i + 1, "corners" to corners, "mode" to filter.mode, "level" to filter.level)) }
             }
             // the scan's words become text, searchable and selectable, when text recognition is installed
             withContext(Dispatchers.IO) { runCatching { eng.prepareOcrModels(getApplication()) } }
             if (runCatching { eng.tool("ocr_status") }.getOrNull()?.optBoolean("available", false) == true) {
-                busy = "Recognizing text…"
+                busy = text(R.string.msg_busy_recognizing)
                 runCatching { eng.tool("ocr_recognize", mapOf("doc" to id)) }
             }
             val out = tempFile("pdf")
@@ -2163,7 +2172,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH.mm.ss", java.util.Locale.US).format(java.util.Date())
                 val name = DocumentFiles.safeName(chosen.ifEmpty { "Scan $stamp" })
                 val uri = withContext(Dispatchers.IO) { files.saveToDownloads(out, name).also { out.delete() } }
-                tell("Saved as $name in Downloads")
+                tell(text(R.string.msg_saved_downloads, name))
                 open(uri)
             }
         } finally {
@@ -2299,7 +2308,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return all.filter { q in it.name.lowercase() }.distinctBy { it.key }.distinctBy { sameFile(it.name, it.size) }
     }
 
-    private fun locationOf(uri: String): String = runCatching { files.displayLocation(Uri.parse(uri)) }.getOrDefault("This device")
+    private fun locationOf(uri: String): String = runCatching { files.displayLocation(Uri.parse(uri)) }.getOrDefault(text(R.string.files_location_this_device))
 
     fun clearRecents() {
         viewModelScope.launch {
@@ -2370,7 +2379,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun shareFiles(rows: List<io.github.artcraftandroid.pdfcraft.ui.home.FileRow>) {
         viewModelScope.launch {
             val local = rows.mapNotNull { r -> localFileOf(r)?.let { it to r.name } }
-            if (local.isEmpty()) return@launch tell("The files couldn't be read.")
+            if (local.isEmpty()) return@launch tell(text(R.string.msg_files_unreadable))
             val uris = withContext(Dispatchers.IO) { files.shareableAll(local) }
             val send = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.first())
             else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
@@ -2394,7 +2403,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun shareFile(row: io.github.artcraftandroid.pdfcraft.ui.home.FileRow) {
         viewModelScope.launch {
-            val f = localFileOf(row) ?: return@launch tell("The file couldn't be read.")
+            val f = localFileOf(row) ?: return@launch tell(text(R.string.common_file_unreadable))
             val uri = withContext(Dispatchers.IO) { files.shareable(f, row.name) }
             intents.trySend(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/pdf").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null))
         }
@@ -2402,14 +2411,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun printFile(row: io.github.artcraftandroid.pdfcraft.ui.home.FileRow) {
         viewModelScope.launch {
-            val f = localFileOf(row) ?: return@launch tell("The file couldn't be read.")
+            val f = localFileOf(row) ?: return@launch tell(text(R.string.common_file_unreadable))
             prints.trySend(f to row.name)
         }
     }
 
     fun openWith(row: io.github.artcraftandroid.pdfcraft.ui.home.FileRow) {
         viewModelScope.launch {
-            val f = localFileOf(row) ?: return@launch tell("The file couldn't be read.")
+            val f = localFileOf(row) ?: return@launch tell(text(R.string.common_file_unreadable))
             val uri = withContext(Dispatchers.IO) { files.shareable(f, row.name) }
             intents.trySend(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null))
         }
@@ -2425,8 +2434,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         u.scheme == "file" -> {
                             val f = File(requireNotNull(u.path))
                             val target = File(f.parentFile, name)
-                            require(!target.exists()) { "A file named $name is already there." }
-                            require(f.renameTo(target)) { "The file couldn't be renamed." }
+                            require(!target.exists()) { text(R.string.msg_rename_exists, name) }
+                            require(f.renameTo(target)) { text(R.string.msg_rename_failed) }
                             recents.remove(setOf(row.key))
                             recents.touch(RecentFile(Uri.fromFile(target).toString(), name, System.currentTimeMillis(), 0, target.length()))
                             bookmarkStore.move(row.key, Uri.fromFile(target).toString())
@@ -2434,12 +2443,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         // what the tools saved to Downloads: MediaStore entries keep their address when renamed
                         u.authority == android.provider.MediaStore.AUTHORITY -> {
                             val values = android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name) }
-                            require(getApplication<Application>().contentResolver.update(u, values, null, null) > 0) { "This file can't be renamed here." }
+                            require(getApplication<Application>().contentResolver.update(u, values, null, null) > 0) { text(R.string.msg_rename_not_here) }
                             recents.update(row.key) { it.copy(name = name) }
                         }
                         else -> {
                             val renamed = android.provider.DocumentsContract.renameDocument(getApplication<Application>().contentResolver, u, name)
-                                ?: error("This file can't be renamed here.")
+                                ?: error(text(R.string.msg_rename_not_here))
                             recents.remove(setOf(row.key))
                             recents.touch(RecentFile(renamed.toString(), name, System.currentTimeMillis(), 0, files.size(renamed) ?: 0))
                             bookmarkStore.move(row.key, renamed.toString())
@@ -2455,11 +2464,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun duplicateFile(row: io.github.artcraftandroid.pdfcraft.ui.home.FileRow) {
         viewModelScope.launch {
-            val f = localFileOf(row) ?: return@launch tell("The file couldn't be read.")
+            val f = localFileOf(row) ?: return@launch tell(text(R.string.common_file_unreadable))
             val copy = withContext(Dispatchers.IO) { File(getApplication<Application>().cacheDir, "dup-${System.nanoTime()}.pdf").also { f.copyTo(it, overwrite = true) } }
             val base = row.name.removeSuffix(".pdf")
             val uri = withContext(Dispatchers.IO) { files.saveToDownloads(copy, "$base copy.pdf").also { copy.delete() } }
-            tell("Duplicated as $base copy.pdf in Downloads", "Open") { open(uri) }
+            tell(text(R.string.msg_duplicated, "$base copy.pdf"), text(R.string.common_open)) { open(uri) }
             scanLocal(force = true)
         }
     }
@@ -2477,9 +2486,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         copyRow = null
         if (target == null) return true
         viewModelScope.launch {
-            val f = localFileOf(row) ?: return@launch tell("The file couldn't be read.")
+            val f = localFileOf(row) ?: return@launch tell(text(R.string.common_file_unreadable))
             runCatching { withContext(Dispatchers.IO) { files.writeBack(f, target) } }
-                .onSuccess { tell("Saved a copy") }.onFailure { tell(it.userMessage) }
+                .onSuccess { tell(text(R.string.msg_saved_copy)) }.onFailure { tell(it.userMessage) }
         }
         return true
     }
@@ -2490,15 +2499,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
                     when {
-                        u.scheme == "file" -> require(File(requireNotNull(u.path)).delete()) { "The file couldn't be deleted." }
+                        u.scheme == "file" -> require(File(requireNotNull(u.path)).delete()) { text(R.string.msg_delete_failed) }
                         u.authority == android.provider.MediaStore.AUTHORITY ->
-                            require(getApplication<Application>().contentResolver.delete(u, null, null) > 0) { "The file couldn't be deleted." }
-                        else -> require(android.provider.DocumentsContract.deleteDocument(getApplication<Application>().contentResolver, u)) { "The file couldn't be deleted." }
+                            require(getApplication<Application>().contentResolver.delete(u, null, null) > 0) { text(R.string.msg_delete_failed) }
+                        else -> require(android.provider.DocumentsContract.deleteDocument(getApplication<Application>().contentResolver, u)) { text(R.string.msg_delete_failed) }
                     }
                     recents.remove(setOf(row.key))
                 }
             }
-            ok.onFailure { tell(it.userMessage) }.onSuccess { tell("${row.name} deleted") }
+            ok.onFailure { tell(it.userMessage) }.onSuccess { tell(text(R.string.msg_file_deleted, row.name)) }
             refreshRecents()
             scanLocal(force = true)
         }
@@ -2540,7 +2549,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearFormSuggestions() {
         appPrefs.edit().remove("suggestions").apply()
-        tell("Suggestions cleared")
+        tell(text(R.string.msg_suggestions_cleared))
     }
 
     // ---- Selecting a comment ------------------------------------------------------------------

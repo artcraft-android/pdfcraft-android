@@ -60,6 +60,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import io.github.artcraftandroid.pdfcraft.R
+import io.github.artcraftandroid.pdfcraft.text
 import io.github.artcraftandroid.pdfcraft.core.TextRange
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
@@ -313,7 +316,7 @@ private fun MarkupLayer(vm: AppViewModel, doc: OpenDocument) {
                 scope.launch {
                     val n = withContext(eng.commands) { eng.session.glyphCount(doc.id, at.page.toUInt()) }
                     if (n == 0u) {
-                        vm.tell("This page has no text to mark. Recognize text first (More tools ▸ Recognize text).")
+                        vm.tell(text(R.string.toolbar_no_text_to_mark))
                         return@launch
                     }
                     val g = withContext(eng.commands) { eng.session.nearestGlyph(doc.id, at.page.toUInt(), at.x, at.y) } ?: return@launch
@@ -367,31 +370,33 @@ fun ToolSubToolbar(vm: AppViewModel, doc: OpenDocument) {
     }
     when (ctl.tool) {
         ViewerTool.Markup -> SubToolbar {
-            SubTool(LucideIcons.Highlighter, "Highlight", ctl.markup == TextMarkup.Highlight, { ctl.markup = TextMarkup.Highlight })
-            SubTool(LucideIcons.Underline, "Underline", ctl.markup == TextMarkup.Underline, { ctl.markup = TextMarkup.Underline })
-            SubTool(LucideIcons.Strikethrough, "Strikethrough", ctl.markup == TextMarkup.Strikethrough, { ctl.markup = TextMarkup.Strikethrough })
+            SubTool(LucideIcons.Highlighter, stringResource(R.string.common_tool_highlight), ctl.markup == TextMarkup.Highlight, { ctl.markup = TextMarkup.Highlight })
+            SubTool(LucideIcons.Underline, stringResource(R.string.common_tool_underline), ctl.markup == TextMarkup.Underline, { ctl.markup = TextMarkup.Underline })
+            SubTool(LucideIcons.Strikethrough, stringResource(R.string.toolbar_strikethrough), ctl.markup == TextMarkup.Strikethrough, { ctl.markup = TextMarkup.Strikethrough })
             SubDivider()
             ColorDot(prefs.color(ctl.markup.styled), picker == Picker.Color) { toggle(Picker.Color) }
         }
         ViewerTool.Draw -> SubToolbar {
-            SubTool(LucideIcons.PenLine, "Draw freeform", true, {})
+            val snapOn = stringResource(R.string.toolbar_snap_on)
+            val snapOff = stringResource(R.string.toolbar_snap_off)
+            SubTool(LucideIcons.PenLine, stringResource(R.string.toolbar_draw_freeform), true, {})
             SubDivider()
-            SubProperty(LucideIcons.Menu, "Line thickness", picker == Picker.Width, { toggle(Picker.Width) })
+            SubProperty(LucideIcons.Menu, stringResource(R.string.toolbar_line_thickness), picker == Picker.Width, { toggle(Picker.Width) })
             ColorDot(prefs.color(StyledTool.Ink), picker == Picker.Color) { toggle(Picker.Color) }
             SubDivider()
-            SubTool(LucideIcons.Shapes, "Snap to shape", prefs.snapToShape, {
+            SubTool(LucideIcons.Shapes, stringResource(R.string.toolbar_snap_to_shape), prefs.snapToShape, {
                 prefs.updateSnapToShape(!prefs.snapToShape)
-                vm.tell(if (prefs.snapToShape) "Snap to shape on" else "Snap to shape off")
+                vm.tell(if (prefs.snapToShape) snapOn else snapOff)
             })
         }
         ViewerTool.Comment -> SubToolbar {
-            SubTool(LucideIcons.MessageSquareText, "Text comment", ctl.commentMode == CommentMode.Text, { ctl.commentMode = CommentMode.Text })
-            SubTool(LucideIcons.MicAudioLines, "Voice comment", ctl.commentMode == CommentMode.Voice, { ctl.commentMode = CommentMode.Voice })
+            SubTool(LucideIcons.MessageSquareText, stringResource(R.string.toolbar_text_comment), ctl.commentMode == CommentMode.Text, { ctl.commentMode = CommentMode.Text })
+            SubTool(LucideIcons.MicAudioLines, stringResource(R.string.toolbar_voice_comment), ctl.commentMode == CommentMode.Voice, { ctl.commentMode = CommentMode.Voice })
         }
         ViewerTool.Text -> SubToolbar {
-            SubTool(LucideIcons.Type, "Text", true, {})
+            SubTool(LucideIcons.Type, stringResource(R.string.toolbar_tool_text), true, {})
             SubDivider()
-            SubProperty(LucideIcons.ALargeSmall, "Text size", picker == Picker.TextSize, { toggle(Picker.TextSize) })
+            SubProperty(LucideIcons.ALargeSmall, stringResource(R.string.toolbar_text_size), picker == Picker.TextSize, { toggle(Picker.TextSize) })
             ColorDot(prefs.color(StyledTool.FreeText), picker == Picker.Color) { toggle(Picker.Color) }
         }
         ViewerTool.FillSign -> FillSignToolbar(vm, doc)
@@ -428,30 +433,32 @@ fun PropertyPicker(vm: AppViewModel, tool: StyledTool, picker: Picker, markup: T
     PdfSheet(onDismiss = onDismiss, modifier = Modifier.padding(bottom = BottomBarHeight + 1.dp).navigationBarsPadding(), bottomBand = false) {
         when (picker) {
             Picker.Color -> {
-                val title = when (tool) {
-                    StyledTool.Highlight -> "Highlight color"
-                    StyledTool.Underline -> "Underline color"
-                    StyledTool.Strikethrough -> "Strikethrough color"
-                    StyledTool.Ink -> "Drawing color"
-                    StyledTool.FreeText -> "Text color"
-                    StyledTool.Note -> "Comment color"
-                }
+                val title = stringResource(
+                    when (tool) {
+                        StyledTool.Highlight -> R.string.toolbar_color_highlight
+                        StyledTool.Underline -> R.string.toolbar_color_underline
+                        StyledTool.Strikethrough -> R.string.toolbar_color_strikethrough
+                        StyledTool.Ink -> R.string.toolbar_color_drawing
+                        StyledTool.FreeText -> R.string.toolbar_color_text
+                        StyledTool.Note -> R.string.toolbar_color_comment
+                    },
+                )
                 Text(title, color = c.text, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 3.dp, bottom = 18.dp))
                 ColorGrid(prefs.color(tool)) { prefs.setColor(tool, it) }
                 if (tool != StyledTool.FreeText) {
-                    Text("Opacity", color = c.text, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 78.dp, top = 20.dp, bottom = 8.dp))
+                    Text(stringResource(R.string.toolbar_opacity), color = c.text, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 78.dp, top = 20.dp, bottom = 8.dp))
                     OpacitySlider(prefs.color(tool), prefs.opacity(tool)) { prefs.setOpacity(tool, it) }
                 }
                 Spacer(Modifier.height(30.dp))
             }
             Picker.Width -> {
-                Text("Line thickness", color = c.text, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, bottom = 12.dp))
+                Text(stringResource(R.string.toolbar_line_thickness), color = c.text, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, bottom = 12.dp))
                 InkWidthRow(prefs.color(StyledTool.Ink), prefs.inkWidth) { prefs.updateInkWidth(it) }
             }
             Picker.TextSize -> {
-                Text("Text size", color = c.text, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, bottom = 4.dp))
+                Text(stringResource(R.string.toolbar_text_size), color = c.text, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, bottom = 4.dp))
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${prefs.textSize.toInt()} pt", color = c.text, fontSize = 15.sp, modifier = Modifier.width(56.dp))
+                    Text(stringResource(R.string.toolbar_text_size_pt, prefs.textSize.toInt()), color = c.text, fontSize = 15.sp, modifier = Modifier.width(56.dp))
                     Slider(
                         value = prefs.textSize,
                         onValueChange = { v -> prefs.updateTextSize((Math.round(v / 2f) * 2f).coerceIn(6f, 22f)) },
@@ -474,11 +481,12 @@ fun InkWidthRow(color: Color, selected: Float?, onPick: (Float) -> Unit) {
     val c = pdfColors
     Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.Center) {
         InkWidths.forEachIndexed { i, w ->
+            val description = stringResource(R.string.toolbar_stroke_width, i + 1)
             Box(
                 Modifier.size(48.dp)
                     .then(if (selected == w) Modifier.border(1.5.dp, c.accent, RoundedCornerShape(4.dp)) else Modifier)
                     .clickable(role = Role.RadioButton) { onPick(w) }
-                    .semantics { contentDescription = "Stroke width ${i + 1}" },
+                    .semantics { contentDescription = description },
                 contentAlignment = Alignment.Center,
             ) {
                 Box(Modifier.width(28.dp).height((1 + i * 1.2f).dp).background(color))
@@ -496,6 +504,7 @@ fun ColorGrid(selected: Color, onPick: (Color) -> Unit) {
         CommentPalette.chunked(6).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 row.forEach { (color, name) ->
+                    val label = stringResource(name)
                     val isSel = color.toArgbInt() == selected.toArgbInt()
                     // only a swatch the colour of the sheet itself needs an outline to be seen
                     val outlined = kotlin.math.abs(color.luminance() - c.surface.luminance()) < 0.08f
@@ -515,7 +524,7 @@ fun ColorGrid(selected: Color, onPick: (Color) -> Unit) {
                             .background(color)
                             .then(if (outlined) Modifier.border(1.dp, c.divider, RoundedCornerShape(3.dp)) else Modifier)
                             .clickable(role = Role.RadioButton) { onPick(color) }
-                            .semantics { contentDescription = name },
+                            .semantics { contentDescription = label },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (isSel) Icon(LucideIcons.Check, null, tint = if (color.luminance() > 0.5f) Color.Black else Color.White, modifier = Modifier.size(20.dp))
@@ -534,6 +543,7 @@ fun ColorGrid(selected: Color, onPick: (Color) -> Unit) {
 fun OpacitySlider(color: Color, value: Float, onChange: (Float) -> Unit) {
     val min = 0.25f
     val sheet = pdfColors.surface
+    val description = stringResource(R.string.toolbar_opacity_percent, (value * 100).toInt())
     Box(
         Modifier.fillMaxWidth().padding(horizontal = 78.dp).height(35.dp)
             .pointerInput(Unit) {
@@ -543,7 +553,7 @@ fun OpacitySlider(color: Color, value: Float, onChange: (Float) -> Unit) {
             .pointerInput(Unit) {
                 detectHorizontalDragGestures { change, _ -> onChange((min + (change.position.x / size.width).coerceIn(0f, 1f) * (1f - min))) }
             }
-            .semantics { contentDescription = "Opacity ${(value * 100).toInt()}%" },
+            .semantics { contentDescription = description },
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val sq = 12.dp.toPx()

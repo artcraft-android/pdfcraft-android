@@ -257,6 +257,8 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
+            // the pseudo-languages (English with accents, mirrored text) show any text not yet in strings.xml
+            isPseudoLocalesEnabled = true
         }
         release {
             isMinifyEnabled = true
@@ -278,6 +280,11 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    // the languages in res/values-* go into the manifest, so Android 13+ offers them under
+    // App languages in the system settings (res/resources.properties names the default)
+    androidResources {
+        generateLocaleConfig = true
     }
 }
 

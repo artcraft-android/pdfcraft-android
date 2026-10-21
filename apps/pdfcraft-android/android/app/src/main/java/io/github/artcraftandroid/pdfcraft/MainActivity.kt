@@ -135,9 +135,9 @@ class MainActivity : ComponentActivity() {
         try {
             block()
         } catch (e: ActivityNotFoundException) {
-            vm.tell("No app on this phone can do that.")
+            vm.tell(getString(R.string.main_error_no_app))
         } catch (e: SecurityException) {
-            vm.tell("Android didn't allow that.")
+            vm.tell(getString(R.string.main_error_not_allowed))
         }
     }
 
@@ -188,7 +188,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        runCatching { pm.print(name, adapter, null) }.onFailure { vm.tell("Printing isn't allowed for this document.") }
+        runCatching { pm.print(name, adapter, null) }.onFailure { vm.tell(getString(R.string.main_error_print_not_allowed)) }
     }
 }
 

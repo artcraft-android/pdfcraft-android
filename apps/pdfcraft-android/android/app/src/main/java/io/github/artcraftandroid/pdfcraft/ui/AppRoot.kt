@@ -45,6 +45,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.ui.home.HomeRoot
 import io.github.artcraftandroid.pdfcraft.ui.home.SettingsScreen
 import io.github.artcraftandroid.pdfcraft.ui.viewer.CertSignScreen
@@ -122,37 +124,37 @@ fun AppRoot(vm: AppViewModel, onBrowse: () -> Unit, onPickSignatureImage: () -> 
         if (vm.authorPrompt) {
             var name by remember { mutableStateOf("") }
             PdfDialog(
-                onDismiss = { vm.authorPrompt = false }, title = "Your name on comments",
-                confirm = "Save", onConfirm = { vm.toolPrefs.author = name.trim(); vm.authorPrompt = false; vm.prefsChanged++ },
-                dismiss = "Skip",
+                onDismiss = { vm.authorPrompt = false }, title = stringResource(R.string.home_author_title),
+                confirm = stringResource(R.string.common_save), onConfirm = { vm.toolPrefs.author = name.trim(); vm.authorPrompt = false; vm.prefsChanged++ },
+                dismiss = stringResource(R.string.root_skip),
             ) {
-                Text("Add a name to show who made each comment. You can change it later in Preferences.", color = c.text, fontSize = 14.sp)
+                Text(stringResource(R.string.root_author_prompt_body), color = c.text, fontSize = 14.sp)
                 Spacer(Modifier.height(14.dp))
-                PdfField(name, { name = it }, "Your name")
+                PdfField(name, { name = it }, stringResource(R.string.common_your_name))
             }
         }
         vm.readOnlyPrompt?.let { d ->
             PdfDialog(
-                onDismiss = { vm.answerReadOnly(null) }, title = "File is read-only",
-                confirm = "Save a copy", onConfirm = { vm.answerReadOnly(true) },
-                dismiss = "Discard", onDismissButton = { vm.answerReadOnly(false) },
-            ) { Text("Your changes to ${d.name} can't be saved where the file is. Save a copy to keep them.", color = c.text, fontSize = 14.sp) }
+                onDismiss = { vm.answerReadOnly(null) }, title = stringResource(R.string.root_read_only_title),
+                confirm = stringResource(R.string.common_save_copy), onConfirm = { vm.answerReadOnly(true) },
+                dismiss = stringResource(R.string.root_discard), onDismissButton = { vm.answerReadOnly(false) },
+            ) { Text(stringResource(R.string.root_read_only_body, d.name), color = c.text, fontSize = 14.sp) }
         }
         vm.linkPrompt?.let { url ->
             val shown = runCatching { android.net.Uri.parse(url).let { u -> "${u.scheme}://${u.host}${if (u.port > 0) ":${u.port}" else ""}" } }.getOrDefault(url)
-            PdfDialog(onDismiss = { vm.answerLink(false) }, title = "Open web page", confirm = "Open", onConfirm = { vm.answerLink(true) }) {
-                Text("Do you want to open the page at $shown?", color = c.text, fontSize = 14.sp)
+            PdfDialog(onDismiss = { vm.answerLink(false) }, title = stringResource(R.string.root_open_link_title), confirm = stringResource(R.string.common_open), onConfirm = { vm.answerLink(true) }) {
+                Text(stringResource(R.string.root_open_link_body, shown), color = c.text, fontSize = 14.sp)
             }
         }
         vm.confirmDeleteAllBookmarks?.let { d ->
             PdfDialog(
-                onDismiss = { vm.confirmDeleteAllBookmarks = null }, title = "Delete all bookmarks?",
-                confirm = "Delete all", onConfirm = { vm.confirmDeleteAllBookmarks = null; vm.deleteAllBookmarks(d) }, destructive = true,
-            ) { Text("All of this document's bookmarks are removed.", color = c.text, fontSize = 14.sp) }
+                onDismiss = { vm.confirmDeleteAllBookmarks = null }, title = stringResource(R.string.root_delete_bookmarks_title),
+                confirm = stringResource(R.string.root_delete_all), onConfirm = { vm.confirmDeleteAllBookmarks = null; vm.deleteAllBookmarks(d) }, destructive = true,
+            ) { Text(stringResource(R.string.root_delete_bookmarks_body), color = c.text, fontSize = 14.sp) }
         }
         vm.readingModeBlocked?.let {
-            PdfDialog(onDismiss = { vm.readingModeBlocked = null }, title = "Reading Mode", confirm = "OK", onConfirm = { vm.readingModeBlocked = null }, dismiss = null) {
-                Text("Tools work on the page itself. Choose Continuous or Single page in View settings to use this one.", color = c.text, fontSize = 14.sp)
+            PdfDialog(onDismiss = { vm.readingModeBlocked = null }, title = stringResource(R.string.root_reading_mode_title), confirm = stringResource(R.string.common_ok), onConfirm = { vm.readingModeBlocked = null }, dismiss = null) {
+                Text(stringResource(R.string.root_reading_mode_body), color = c.text, fontSize = 14.sp)
             }
         }
         vm.busy?.let { message ->
@@ -174,14 +176,22 @@ private fun PasswordDialog(vm: AppViewModel, req: PasswordRequest) {
     var pw by remember(req) { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     LaunchedEffect(req) { runCatching { focus.requestFocus() } }
-    PdfDialog(onDismiss = { vm.answerPassword(null) }, title = "Enter password", confirm = "OK", onConfirm = { vm.answerPassword(pw) }) {
+    // the sentence with the file's name in italics where its %1$s is
+    val body = stringResource(R.string.root_password_body)
+    PdfDialog(onDismiss = { vm.answerPassword(null) }, title = stringResource(R.string.root_enter_password), confirm = stringResource(R.string.common_ok), onConfirm = { vm.answerPassword(pw) }) {
         Text(buildAnnotatedString {
-            withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(req.file.name) }
-            append(" is protected. Please enter the password to open the document.")
+            val at = body.indexOf("%1\$s")
+            if (at < 0) {
+                append(body)
+            } else {
+                append(body.substring(0, at))
+                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(req.file.name) }
+                append(body.substring(at + "%1\$s".length))
+            }
         }, color = c.text, fontSize = 14.sp)
         Spacer(Modifier.height(14.dp))
         PdfField(
-            pw, { pw = it }, "Password", error = req.wrong && pw.isEmpty(), password = true, focus = focus,
+            pw, { pw = it }, stringResource(R.string.common_password), error = req.wrong && pw.isEmpty(), password = true, focus = focus,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { if (pw.isNotEmpty()) vm.answerPassword(pw) }),
         )
@@ -198,8 +208,8 @@ private fun LicencesScreen(vm: AppViewModel) {
     val lucide = remember { runCatching { context.assets.open("licences/LICENSE-lucide.txt").bufferedReader().readText() }.getOrDefault("") }
     Column(Modifier.fillMaxSize().background(c.surface).safeTopPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, "Back", { vm.showLicences = false }) }
-            Text("Open-source licences", color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), { vm.showLicences = false }) }
+            Text(stringResource(R.string.home_licences), color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
             @Composable
@@ -207,14 +217,14 @@ private fun LicencesScreen(vm: AppViewModel) {
                 Text(name, color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 14.dp))
                 Text(licence, color = c.textSecondary, fontSize = 13.sp)
             }
-            entry("PdfCraft (engine and app)", "MIT OR Apache-2.0, by storytold and contributors")
+            entry(stringResource(R.string.root_licence_pdfcraft), stringResource(R.string.root_licence_pdfcraft_terms))
             entry("UniFFI", "MPL-2.0, Mozilla")
             entry("JNA", "Apache-2.0")
             entry("AndroidX, Jetpack Compose, Kotlin coroutines", "Apache-2.0")
-            entry("Lucide icons", "ISC, Lucide Contributors")
-            entry("Inter typeface", "SIL Open Font License 1.1, The Inter Project Authors")
-            entry("Text recognition models (ocrs)", "CC-BY-SA-4.0, Robert Knight; trained on HierText")
-            entry("hayro, lopdf, boa and the engine's other Rust dependencies", "MIT, Apache-2.0 and compatible licences; see NOTICE in the source")
+            entry(stringResource(R.string.root_licence_lucide), "ISC, Lucide Contributors")
+            entry(stringResource(R.string.root_licence_inter), "SIL Open Font License 1.1, The Inter Project Authors")
+            entry(stringResource(R.string.root_licence_ocrs), stringResource(R.string.root_licence_ocrs_terms))
+            entry(stringResource(R.string.root_licence_rust), stringResource(R.string.root_licence_rust_terms))
             Spacer(Modifier.height(20.dp))
             Text(lucide, color = c.textSecondary, fontSize = 11.sp)
             Spacer(Modifier.height(20.dp))

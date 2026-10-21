@@ -8,15 +8,16 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import io.github.artcraftandroid.pdfcraft.R
 
 /** The comment colours: 18 swatches in three rows of six (strong, light, greys), as measured on the reference. */
-val CommentPalette: List<Pair<Color, String>> = listOf(
-    Color(0xFF0000FF) to "Blue", Color(0xFF6AD928) to "Green", Color(0xFFFFD100) to "Yellow",
-    Color(0xFFFF7002) to "Orange", Color(0xFFE52237) to "Red", Color(0xFFA33086) to "Purple",
-    Color(0xFF38E5FF) to "Light blue", Color(0xFFC5FB72) to "Light green", Color(0xFFFCF485) to "Light yellow",
-    Color(0xFFFFC09E) to "Light orange", Color(0xFFFF809D) to "Pink", Color(0xFFFB88FF) to "Light purple",
-    Color(0xFFFFFFFF) to "White", Color(0xFFCCCCCC) to "Pale grey", Color(0xFFAAAAAA) to "Light grey",
-    Color(0xFF777777) to "Medium grey", Color(0xFF444444) to "Dark grey", Color(0xFF000000) to "Black",
+val CommentPalette: List<Pair<Color, Int>> = listOf(
+    Color(0xFF0000FF) to R.string.prefs_color_blue, Color(0xFF6AD928) to R.string.prefs_color_green, Color(0xFFFFD100) to R.string.prefs_color_yellow,
+    Color(0xFFFF7002) to R.string.prefs_color_orange, Color(0xFFE52237) to R.string.prefs_color_red, Color(0xFFA33086) to R.string.prefs_color_purple,
+    Color(0xFF38E5FF) to R.string.prefs_color_light_blue, Color(0xFFC5FB72) to R.string.prefs_color_light_green, Color(0xFFFCF485) to R.string.prefs_color_light_yellow,
+    Color(0xFFFFC09E) to R.string.prefs_color_light_orange, Color(0xFFFF809D) to R.string.prefs_color_pink, Color(0xFFFB88FF) to R.string.prefs_color_light_purple,
+    Color(0xFFFFFFFF) to R.string.prefs_color_white, Color(0xFFCCCCCC) to R.string.prefs_color_pale_grey, Color(0xFFAAAAAA) to R.string.prefs_color_light_grey,
+    Color(0xFF777777) to R.string.prefs_color_medium_grey, Color(0xFF444444) to R.string.prefs_color_dark_grey, Color(0xFF000000) to R.string.prefs_color_black,
 )
 
 /** The seven ink widths of the stroke picker, in points. */

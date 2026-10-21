@@ -33,10 +33,12 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.OpenDocument
 import io.github.artcraftandroid.pdfcraft.ui.pdfColors
@@ -58,9 +60,10 @@ fun ReadingModeContent(vm: AppViewModel, doc: OpenDocument, top: Dp, bottom: Dp,
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (vm.pendingPage ?: doc.viewer.currentPage).coerceIn(0, (doc.pageCount - 1).coerceAtLeast(0)))
     var size by remember { mutableFloatStateOf(17f) }
     var hint by remember { mutableStateOf<String?>(null) }
+    val pinchHint = stringResource(R.string.viewer_reading_hint)
     LaunchedEffect(doc) {
         delay(400)
-        hint = "Pinch or double-tap to make the text bigger."
+        hint = pinchHint
         delay(3000)
         hint = null
     }
@@ -129,7 +132,7 @@ fun ReadingModeContent(vm: AppViewModel, doc: OpenDocument, top: Dp, bottom: Dp,
                 Column(Modifier.fillMaxWidth().then(if (ps == null) Modifier.fillParentMaxHeight() else Modifier.heightIn(min = 120.dp)).background(paper).padding(horizontal = 20.dp, vertical = 16.dp)) {
                     when {
                         ps == null -> Unit
-                        ps.isEmpty() -> Text("No text on this page to reflow.", color = ink.copy(alpha = 0.6f), fontSize = size.sp)
+                        ps.isEmpty() -> Text(stringResource(R.string.viewer_reading_no_text), color = ink.copy(alpha = 0.6f), fontSize = size.sp)
                         else -> {
                             val body = ps.map { it.size }.sorted().let { it[it.size / 2] }.coerceAtLeast(1f)
                             for ((i, p) in ps.withIndex()) {

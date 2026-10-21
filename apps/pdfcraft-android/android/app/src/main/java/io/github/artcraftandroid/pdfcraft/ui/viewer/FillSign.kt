@@ -2,6 +2,7 @@ package io.github.artcraftandroid.pdfcraft.ui.viewer
 
 import io.github.artcraftandroid.pdfcraft.ui.safeTopPadding
 import android.graphics.Bitmap
+import androidx.annotation.StringRes
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -53,6 +54,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
 import io.github.artcraftandroid.pdfcraft.ui.LucideIcons
@@ -65,15 +68,15 @@ import io.github.artcraftandroid.pdfcraft.ui.pdfColors
 import java.io.File
 
 /** What a tap places in Fill & Sign. */
-enum class FillElement(val engineType: String, val label: String) {
-    Text("text", "Text"),
-    Cross("cross", "Cross"),
-    Check("check", "Checkmark"),
-    Dot("dot", "Dot"),
-    Box("box", "Rounded box"),
-    Line("line", "Line"),
-    Signature("signature", "Signature"),
-    Initials("initials", "Initials"),
+enum class FillElement(val engineType: String, @StringRes val label: Int) {
+    Text("text", R.string.fill_element_text),
+    Cross("cross", R.string.fill_element_cross),
+    Check("check", R.string.fill_element_check),
+    Dot("dot", R.string.fill_element_dot),
+    Box("box", R.string.fill_element_box),
+    Line("line", R.string.fill_element_line),
+    Signature("signature", R.string.fill_element_signature),
+    Initials("initials", R.string.fill_element_initials),
 }
 
 /** The saved signature and initials (PNG with transparency), kept in the app's private files. */
@@ -131,14 +134,14 @@ fun FillSignToolbar(vm: AppViewModel, doc: OpenDocument) {
     val sel = vm.fillElement
     SubToolbar {
         if (doc.info.fields == 0u) {
-            SubTextField("Add text", sel == FillElement.Text) { vm.fillElement = FillElement.Text }
-            SubTool(LucideIcons.X, "Add a cross", sel == FillElement.Cross, { vm.fillElement = FillElement.Cross })
-            SubTool(LucideIcons.Check, "Add a checkmark", sel == FillElement.Check, { vm.fillElement = FillElement.Check })
-            SubDot("Add a dot", sel == FillElement.Dot) { vm.fillElement = FillElement.Dot }
-            SubTool(LucideIcons.RectangleHorizontal, "Add a rounded box", sel == FillElement.Box, { vm.fillElement = FillElement.Box })
-            SubTool(LucideIcons.Minus, "Add a line", sel == FillElement.Line, { vm.fillElement = FillElement.Line })
+            SubTextField(stringResource(R.string.fill_add_text), sel == FillElement.Text) { vm.fillElement = FillElement.Text }
+            SubTool(LucideIcons.X, stringResource(R.string.fill_add_cross), sel == FillElement.Cross, { vm.fillElement = FillElement.Cross })
+            SubTool(LucideIcons.Check, stringResource(R.string.fill_add_check), sel == FillElement.Check, { vm.fillElement = FillElement.Check })
+            SubDot(stringResource(R.string.fill_add_dot), sel == FillElement.Dot) { vm.fillElement = FillElement.Dot }
+            SubTool(LucideIcons.RectangleHorizontal, stringResource(R.string.fill_add_box), sel == FillElement.Box, { vm.fillElement = FillElement.Box })
+            SubTool(LucideIcons.Minus, stringResource(R.string.fill_add_line), sel == FillElement.Line, { vm.fillElement = FillElement.Line })
         }
-        SubTool(LucideIcons.Signature, "Sign or add initials", sel == FillElement.Signature || sel == FillElement.Initials || doc.controller.signPanel, { doc.controller.signPanel = true })
+        SubTool(LucideIcons.Signature, stringResource(R.string.fill_sign_or_initials), sel == FillElement.Signature || sel == FillElement.Initials || doc.controller.signPanel, { doc.controller.signPanel = true })
     }
 }
 
@@ -152,14 +155,14 @@ fun SignPanel(vm: AppViewModel, doc: OpenDocument, onDismiss: () -> Unit) {
         Spacer(Modifier.height(7.dp))
         for (initials in listOf(false, true)) {
             val file = vm.signatures.fileFor(initials)
-            val label = if (initials) "initials" else "signature"
+            val placeHint = stringResource(if (initials) R.string.fill_tap_place_initials else R.string.fill_tap_place_signature)
             if (!initials) Unit else Spacer(Modifier.height(18.dp))
             SignBox(
                 onClick = {
                     if (file.isFile) {
                         vm.fillElement = if (initials) FillElement.Initials else FillElement.Signature
                         onDismiss()
-                        vm.tell("Tap where you want to place your $label")
+                        vm.tell(placeHint)
                     } else {
                         onDismiss()
                         vm.signaturePad = SignaturePad(initials, doc, null)
@@ -168,17 +171,17 @@ fun SignPanel(vm: AppViewModel, doc: OpenDocument, onDismiss: () -> Unit) {
             ) {
                 if (file.isFile) {
                     val bmp = remember(file.lastModified(), version) { BitmapFactory.decodeFile(file.absolutePath) }
-                    if (bmp != null) Image(bmp.asImageBitmap(), "Your $label", modifier = Modifier.weight(1f).height(44.dp).padding(start = 12.dp), alignment = Alignment.CenterStart)
-                    BarIcon(LucideIcons.Trash2, "Clear saved $label", { file.delete(); vm.signaturesChanged++ }, size = 40.dp)
+                    if (bmp != null) Image(bmp.asImageBitmap(), stringResource(if (initials) R.string.fill_your_initials else R.string.fill_your_signature), modifier = Modifier.weight(1f).height(44.dp).padding(start = 12.dp), alignment = Alignment.CenterStart)
+                    BarIcon(LucideIcons.Trash2, stringResource(if (initials) R.string.fill_clear_initials else R.string.fill_clear_signature), { file.delete(); vm.signaturesChanged++ }, size = 40.dp)
                 } else {
-                    Text(if (initials) "Add initials" else "Add signature", color = pdfColors.text, fontSize = 16.sp, modifier = Modifier.weight(1f).padding(start = 22.dp))
+                    Text(stringResource(if (initials) R.string.fill_add_initials else R.string.fill_add_signature), color = pdfColors.text, fontSize = 16.sp, modifier = Modifier.weight(1f).padding(start = 22.dp))
                     Icon(LucideIcons.Plus, null, tint = pdfColors.icon, modifier = Modifier.padding(end = 9.dp).size(24.dp))
                 }
             }
         }
         Spacer(Modifier.height(14.dp))
         // a certificate-based signature, which the reference's phone app doesn't have
-        SheetRow(LucideIcons.ShieldCheck, "Sign with a digital ID", { onDismiss(); vm.startCertPlacing(doc) }, chevron = true)
+        SheetRow(LucideIcons.ShieldCheck, stringResource(R.string.common_tool_sign_digital_id), { onDismiss(); vm.startCertPlacing(doc) }, chevron = true)
         Spacer(Modifier.height(10.dp))
     }
 }
@@ -220,24 +223,25 @@ fun SignaturePadScreen(vm: AppViewModel, pad: SignaturePad, onPickImage: () -> U
     var save by remember { mutableStateOf(true) }
     val ink = Color(vm.toolPrefs.fillColor)
     val imported = vm.importedSignature
+    val drawFirst = stringResource(if (pad.initials) R.string.fill_draw_initials_first else R.string.fill_draw_signature_first)
     Column(Modifier.fillMaxSize().background(c.surface).safeTopPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { vm.signaturePad = null; vm.importedSignature = null }) { Text("Cancel", color = c.accent) }
-            Text(if (pad.initials) "Create initials" else "Create signature", color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            TextButton(onClick = { vm.signaturePad = null; vm.importedSignature = null }) { Text(stringResource(R.string.common_cancel), color = c.accent) }
+            Text(stringResource(if (pad.initials) R.string.fill_create_initials else R.string.fill_create_signature), color = c.text, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             TextButton(
                 onClick = {
                     val bmp = imported ?: renderStrokes(strokes, size, ink)
                     if (bmp == null) {
-                        vm.tell(if (pad.initials) "Draw your initials first" else "Draw your signature first")
+                        vm.tell(drawFirst)
                     } else {
                         vm.finishSignature(pad, bmp, save)
                     }
                 },
-            ) { Text("Done", color = c.accent, fontWeight = FontWeight.SemiBold) }
+            ) { Text(stringResource(R.string.common_done), color = c.accent, fontWeight = FontWeight.SemiBold) }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TabChip("Draw", imported == null) { vm.importedSignature = null }
-            TabChip("Image", imported != null) { onPickImage() }
+            TabChip(stringResource(R.string.fill_tab_draw), imported == null) { vm.importedSignature = null }
+            TabChip(stringResource(R.string.fill_tab_image), imported != null) { onPickImage() }
         }
         Box(
             Modifier.fillMaxWidth().weight(1f).padding(16.dp).clip(RoundedCornerShape(8.dp)).background(Color.White).border(1.dp, c.divider, RoundedCornerShape(8.dp))
@@ -266,13 +270,13 @@ fun SignaturePadScreen(vm: AppViewModel, pad: SignaturePad, onPickImage: () -> U
                     }
                 }
                 if (strokes.isEmpty()) {
-                    Text(if (pad.initials) "Draw your initials here" else "Draw your signature here", color = Color(0xFF8A8A8A), modifier = Modifier.align(Alignment.Center))
+                    Text(stringResource(if (pad.initials) R.string.fill_draw_initials_here else R.string.fill_draw_signature_here), color = Color(0xFF8A8A8A), modifier = Modifier.align(Alignment.Center))
                 }
             }
-            Text("Clear", color = c.accent, modifier = Modifier.align(Alignment.TopEnd).clickable { strokes.clear(); vm.importedSignature = null }.padding(12.dp))
+            Text(stringResource(R.string.common_clear), color = c.accent, modifier = Modifier.align(Alignment.TopEnd).clickable { strokes.clear(); vm.importedSignature = null }.padding(12.dp))
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Save to device", color = c.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.fill_save_to_device), color = c.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
             Switch(checked = save, onCheckedChange = { save = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
         }
         Spacer(Modifier.height(8.dp))
@@ -343,10 +347,10 @@ fun androidx.compose.foundation.layout.BoxScope.FillElementMenu(vm: AppViewModel
             Modifier.background(colors.surface, RoundedCornerShape(8.dp)).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BarIcon(LucideIcons.AArrowDown, "Smaller", { vm.scaleFill(doc, c, 1f / 1.2f) })
-            BarIcon(LucideIcons.AArrowUp, "Bigger", { vm.scaleFill(doc, c, 1.2f) })
-            BarIcon(LucideIcons.Palette, "Colour", { palette = !palette }, selected = palette)
-            BarIcon(LucideIcons.Trash2, "Delete", { vm.selectedFill = null; vm.deleteComment(doc, c) }, tint = colors.red)
+            BarIcon(LucideIcons.AArrowDown, stringResource(R.string.fill_smaller), { vm.scaleFill(doc, c, 1f / 1.2f) })
+            BarIcon(LucideIcons.AArrowUp, stringResource(R.string.fill_bigger), { vm.scaleFill(doc, c, 1.2f) })
+            BarIcon(LucideIcons.Palette, stringResource(R.string.fill_colour), { palette = !palette }, selected = palette)
+            BarIcon(LucideIcons.Trash2, stringResource(R.string.common_delete), { vm.selectedFill = null; vm.deleteComment(doc, c) }, tint = colors.red)
         }
         if (palette) {
             Row(Modifier.padding(top = 6.dp).background(colors.surface, RoundedCornerShape(8.dp)).padding(8.dp)) {

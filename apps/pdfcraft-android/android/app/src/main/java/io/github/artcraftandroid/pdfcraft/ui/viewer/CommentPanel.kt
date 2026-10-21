@@ -37,10 +37,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import io.github.artcraftandroid.pdfcraft.core.CommentInfo
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.BarIcon
@@ -101,15 +103,15 @@ fun CommentPanel(vm: AppViewModel, doc: OpenDocument, c: CommentInfo) {
             // the navigator, and the colour button at the right
             Box(Modifier.fillMaxWidth().height(40.dp)) {
                 Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically) {
-                    BarIcon(LucideIcons.ChevronLeft, "Previous comment", { threads.getOrNull(position - 1)?.let(::go) }, size = 40.dp, enabled = position > 0)
+                    BarIcon(LucideIcons.ChevronLeft, stringResource(R.string.comments_previous), { threads.getOrNull(position - 1)?.let(::go) }, size = 40.dp, enabled = position > 0)
                     Spacer(Modifier.width(2.dp))
                     Text(
-                        if (position >= 0) "${position + 1} of ${threads.size}" else "1 of ${threads.size + 1}",
+                        if (position >= 0) stringResource(R.string.comments_position, position + 1, threads.size) else stringResource(R.string.comments_position, 1, threads.size + 1),
                         color = colors.navigatorText, fontSize = 15.sp, modifier = Modifier.widthIn(min = 42.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     )
                     Spacer(Modifier.width(2.dp))
-                    BarIcon(LucideIcons.ChevronRight, "Next comment", { threads.getOrNull(position + 1)?.let(::go) }, size = 40.dp, enabled = position in 0 until threads.size - 1)
+                    BarIcon(LucideIcons.ChevronRight, stringResource(R.string.comments_next), { threads.getOrNull(position + 1)?.let(::go) }, size = 40.dp, enabled = position in 0 until threads.size - 1)
                 }
                 // a note has no property buttons; other comments get their colour here
                 if (canEdit && c.color != null && c.subtype != "Text" && c.subtype != "Sound") {
@@ -136,11 +138,11 @@ fun CommentPanel(vm: AppViewModel, doc: OpenDocument, c: CommentInfo) {
                         kotlinx.coroutines.delay(300)
                         vm.styleComment(doc, c, mapOf("opacity" to opacity.toDouble()))
                     }
-                    Text("Opacity", color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 78.dp, top = 16.dp, bottom = 8.dp))
+                    Text(stringResource(R.string.comments_opacity), color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 78.dp, top = 16.dp, bottom = 8.dp))
                     OpacitySlider(shown, opacity) { opacity = it }
                 }
                 if (c.width != null && c.subtype in LineComments) {
-                    Text("Line thickness", color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp))
+                    Text(stringResource(R.string.comments_line_thickness), color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp))
                     InkWidthRow(shown, InkWidths.minByOrNull { kotlin.math.abs(it - (c.width ?: 0f)) }) { vm.styleComment(doc, c, mapOf("width" to it.toDouble())) }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -156,8 +158,8 @@ fun CommentPanel(vm: AppViewModel, doc: OpenDocument, c: CommentInfo) {
                             )
                             Row {
                                 Spacer(Modifier.weight(1f))
-                                TextButton(onClick = { editing = null }) { Text("Cancel", color = colors.toolAccent) }
-                                TextButton(onClick = { editing = null; vm.editCommentText(doc, cm, text) }) { Text("Save", color = colors.toolAccent, fontWeight = FontWeight.SemiBold) }
+                                TextButton(onClick = { editing = null }) { Text(stringResource(R.string.common_cancel), color = colors.toolAccent) }
+                                TextButton(onClick = { editing = null; vm.editCommentText(doc, cm, text) }) { Text(stringResource(R.string.common_save), color = colors.toolAccent, fontWeight = FontWeight.SemiBold) }
                             }
                         }
                     } else {
@@ -179,19 +181,19 @@ fun CommentPanel(vm: AppViewModel, doc: OpenDocument, c: CommentInfo) {
                                     val text = cm.contents?.takeIf { it.isNotBlank() }
                                     if (text != null) {
                                         DropdownMenuItem(
-                                            text = { Text("Copy text", color = colors.text) },
+                                            text = { Text(stringResource(R.string.comments_copy_text), color = colors.text) },
                                             leadingIcon = { Icon(LucideIcons.Copy, null, tint = colors.icon) },
                                             onClick = { menuFor = null; vm.copyText(text) },
                                         )
                                     }
                                     if (!cm.locked && doc.info.allowsAnnotation) {
                                         DropdownMenuItem(
-                                            text = { Text(if (text == null && i == 0) "Add comment" else "Edit comment", color = colors.text) },
+                                            text = { Text(stringResource(if (text == null && i == 0) R.string.comments_add else R.string.comments_edit), color = colors.text) },
                                             leadingIcon = { Icon(LucideIcons.Pencil, null, tint = colors.icon) },
                                             onClick = { menuFor = null; editing = cm },
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Delete", color = colors.text) },
+                                            text = { Text(stringResource(R.string.common_delete), color = colors.text) },
                                             leadingIcon = { Icon(LucideIcons.Trash2, null, tint = colors.icon) },
                                             onClick = { menuFor = null; vm.deleteComment(doc, cm) },
                                         )
@@ -217,14 +219,14 @@ fun CommentPanel(vm: AppViewModel, doc: OpenDocument, c: CommentInfo) {
                         modifier = Modifier.weight(1f).padding(vertical = 10.dp),
                         decorationBox = { inner ->
                             Box {
-                                if (reply.isEmpty()) Text("Reply", color = colors.replyBorder, fontSize = 16.sp)
+                                if (reply.isEmpty()) Text(stringResource(R.string.comments_reply_hint), color = colors.replyBorder, fontSize = 16.sp)
                                 inner()
                             }
                         },
                     )
                     if (reply.isNotEmpty()) {
                         Box(Modifier.padding(horizontal = 4.dp).size(width = 1.dp, height = 21.dp).background(colors.divider))
-                        BarIcon(LucideIcons.Send, "Post", { vm.postReply(ReplyPrompt(doc, c), reply); reply = "" }, size = 40.dp, enabled = reply.isNotBlank(), tint = colors.toolAccent)
+                        BarIcon(LucideIcons.Send, stringResource(R.string.common_post), { vm.postReply(ReplyPrompt(doc, c), reply); reply = "" }, size = 40.dp, enabled = reply.isNotBlank(), tint = colors.toolAccent)
                     }
                 }
             }

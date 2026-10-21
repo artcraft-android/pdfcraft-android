@@ -74,6 +74,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -83,6 +84,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.pdfcraft.R
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -178,6 +180,7 @@ fun PdfSheet(
     val scope = rememberCoroutineScope()
     var drag by remember { mutableFloatStateOf(0f) }
     var height by remember { mutableIntStateOf(0) }
+    val closeLabel = stringResource(R.string.ui_close_sheet)
     Box(Modifier.fillMaxSize()) {
         AnimatedVisibility(visible, enter = fadeIn(tween(PdfMotion.SHEET_IN_MS)), exit = fadeOut(tween(PdfMotion.SHEET_OUT_MS))) {
             Box(
@@ -185,7 +188,7 @@ fun PdfSheet(
                     .fillMaxSize()
                     .background(if (dim) pdfColors.scrim else Color.Transparent)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)
-                    .semantics { contentDescription = "Close sheet" },
+                    .semantics { contentDescription = closeLabel },
             )
         }
         val density = LocalDensity.current
@@ -289,7 +292,7 @@ fun SheetRow(
 @Composable
 fun SheetBackHeader(title: String, onBack: () -> Unit, trailing: (@Composable RowScope.() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        BarIcon(LucideIcons.ChevronLeft, "Back", onBack)
+        BarIcon(LucideIcons.ChevronLeft, stringResource(R.string.common_back), onBack)
         Spacer(Modifier.width(6.dp))
         Text(title, color = pdfColors.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (trailing != null) trailing()
@@ -384,7 +387,7 @@ fun PdfDialog(
     confirm: String?,
     onConfirm: () -> Unit = {},
     confirmEnabled: Boolean = true,
-    dismiss: String? = "Cancel",
+    dismiss: String? = stringResource(R.string.common_cancel),
     onDismissButton: () -> Unit = onDismiss,
     destructive: Boolean = false,
     /** A choice list's card: lighter grey, narrower, no padding of its own. */
@@ -469,7 +472,7 @@ fun PdfField(
                     .onFocusChanged { focused = it.isFocused }.semantics { contentDescription = placeholder },
             )
         }
-        if (password) BarIcon(if (visible) LucideIcons.Eye else LucideIcons.EyeOff, if (visible) "Hide password" else "Show password", { visible = !visible }, size = 48.dp)
+        if (password) BarIcon(if (visible) LucideIcons.Eye else LucideIcons.EyeOff, stringResource(if (visible) R.string.ui_hide_password else R.string.ui_show_password), { visible = !visible }, size = 48.dp)
         else Spacer(Modifier.width(12.dp))
     }
 }
