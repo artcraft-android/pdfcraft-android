@@ -1,4 +1,4 @@
-An open-source, reimplementation of Adobe Acrobat Reader in Rust while using Kotlin as the UI framework.
+An open-source PDF reader and editor in Rust while using Kotlin as the UI framework.
 
 PdfCraft is a PDF reader and editor for Android, built on the PdfCraft engine. It follows the layout and the tools of Acrobat Reader for phones, and everything stays on your phone: no account, no cloud.
 

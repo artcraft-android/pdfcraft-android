@@ -204,8 +204,12 @@ private fun LicencesScreen(vm: AppViewModel) {
     val c = pdfColors
     val context = LocalContext.current
     androidx.activity.compose.BackHandler { vm.showLicences = false }
-    val inter = remember { runCatching { context.assets.open("licences/OFL-Inter.txt").bufferedReader().readText() }.getOrDefault("") }
-    val lucide = remember { runCatching { context.assets.open("licences/LICENSE-lucide.txt").bufferedReader().readText() }.getOrDefault("") }
+    // the full texts of the bundled notices, in the order of the entries below
+    val texts = remember {
+        listOf("LICENSE-lucide.txt", "OFL-Inter.txt", "OFL-DancingScript.txt", "LICENSE-foxit.txt", "LICENSE-adobe-cmaps.txt").map { name ->
+            runCatching { context.assets.open("licences/$name").bufferedReader().readText() }.getOrDefault("")
+        }
+    }
     Column(Modifier.fillMaxSize().background(c.surface).safeTopPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) { BarIcon(LucideIcons.ArrowLeft, stringResource(R.string.common_back), { vm.showLicences = false }) }
@@ -223,12 +227,15 @@ private fun LicencesScreen(vm: AppViewModel) {
             entry("AndroidX, Jetpack Compose, Kotlin coroutines", "Apache-2.0")
             entry(stringResource(R.string.root_licence_lucide), "ISC, Lucide Contributors")
             entry(stringResource(R.string.root_licence_inter), "SIL Open Font License 1.1, The Inter Project Authors")
+            entry(stringResource(R.string.root_licence_dancing_script), "SIL Open Font License 1.1, The Dancing Script Project Authors")
+            entry(stringResource(R.string.root_licence_foxit), "BSD-3-Clause, Foxit Software Inc. and the PDFium Authors")
+            entry(stringResource(R.string.root_licence_cmaps), "BSD-3-Clause, Adobe")
             entry(stringResource(R.string.root_licence_ocrs), stringResource(R.string.root_licence_ocrs_terms))
             entry(stringResource(R.string.root_licence_rust), stringResource(R.string.root_licence_rust_terms))
-            Spacer(Modifier.height(20.dp))
-            Text(lucide, color = c.textSecondary, fontSize = 11.sp)
-            Spacer(Modifier.height(20.dp))
-            Text(inter, color = c.textSecondary, fontSize = 11.sp)
+            for (licence in texts.filter { it.isNotBlank() }) {
+                Spacer(Modifier.height(20.dp))
+                Text(licence, color = c.textSecondary, fontSize = 11.sp)
+            }
             Spacer(Modifier.height(32.dp))
         }
     }

@@ -35,9 +35,10 @@ You need:
 - [cargo-ndk](https://github.com/bbqsrc/cargo-ndk): `cargo install cargo-ndk`
 - the Android SDK with NDK 29.0.14206865 (Android Studio → SDK Manager → SDK Tools → NDK)
 - JDK 17 or newer (Android Studio's bundled one is fine)
-- optionally the text-recognition models: `./fetch-models.sh` from this folder (12 MB,
-  CC-BY-SA-4.0; `cargo xtask models` in the full PdfCraft workspace); without them the app builds
-  and Recognize text says it isn't installed
+- the text-recognition models (12 MB, CC-BY-SA-4.0) are committed in `assets/models/`, so the
+  build downloads nothing; `./fetch-models.sh` from this folder fetches them again (`cargo xtask
+  models` in the full PdfCraft workspace). Without them the app builds and Recognize text says it
+  isn't installed
 
 Then open `apps/pdfcraft-android/android` in Android Studio and press Run, or from a terminal:
 

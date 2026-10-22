@@ -86,7 +86,7 @@ abstract class CargoNdkBuild : DefaultTask() {
             environment("CARGO_ENCODED_RUSTFLAGS", remap.joinToString("\u001f"))
             commandLine(
                 listOf(cargo.get(), "ndk") + targets +
-                    listOf("--platform", apiLevel.get().toString(), "-o", out, "build", "--release", "-p", "pdfcraft-android", "--lib"),
+                    listOf("--platform", apiLevel.get().toString(), "-o", out, "build", "--release", "--locked", "-p", "pdfcraft-android", "--lib"),
             )
         }
         // cargo-ndk copies every shared library cargo left behind (dylib builds of a few
@@ -111,7 +111,7 @@ abstract class UniffiBindgen : DefaultTask() {
         execOperations.exec {
             workingDir(workspaceDir.get())
             commandLine(
-                cargo.get(), "run", "--quiet", "-p", "pdfcraft-android-bindgen", "--",
+                cargo.get(), "run", "--quiet", "--locked", "-p", "pdfcraft-android-bindgen", "--",
                 "generate", library.get().asFile.absolutePath, "--language", "kotlin", "--out-dir", out.absolutePath, "--no-format",
             )
         }
@@ -119,9 +119,10 @@ abstract class UniffiBindgen : DefaultTask() {
 }
 
 /**
- * Files from PdfCraft's `assets/` the app ships, copied at build time rather than duplicated:
- * its app icon, its UI font Inter (OFL) and the font's licence. [targets] maps each file name to
- * its path in the generated resource (or asset) folder.
+ * Files from PdfCraft's `assets/` (and `vendor/`) the app ships, copied at build time rather than
+ * duplicated: its app icon, its UI font Inter (OFL), and the licences of what the library bundles
+ * (fonts, icons). [targets] maps each file name to its path in the generated resource (or asset)
+ * folder.
  */
 abstract class PdfcraftAssets : DefaultTask() {
     @get:InputFiles @get:PathSensitive(PathSensitivity.NAME_ONLY) abstract val files: ConfigurableFileCollection
@@ -321,8 +322,16 @@ androidComponents {
             targets.set(map.mapKeys { (k, _) -> k.substringAfterLast('/') })
         }
         val licences = tasks.register<PdfcraftAssets>("pdfcraftLicences$name") {
-            files.from(File(assetsDir, "fonts/OFL-Inter.txt"), File(assetsDir, "icons/LICENSE-lucide.txt"))
-            targets.set(mapOf("OFL-Inter.txt" to "licences/OFL-Inter.txt", "LICENSE-lucide.txt" to "licences/LICENSE-lucide.txt"))
+            // the Licences screen shows each (the Adobe CMaps' notice, from a crates.io crate, is a
+            // plain asset: app/src/main/assets/licences)
+            val map = mapOf(
+                File(assetsDir, "fonts/OFL-Inter.txt") to "licences/OFL-Inter.txt",
+                File(assetsDir, "icons/LICENSE-lucide.txt") to "licences/LICENSE-lucide.txt",
+                File(assetsDir, "fonts/OFL-DancingScript.txt") to "licences/OFL-DancingScript.txt",
+                File(cargoWorkspaceDir, "vendor/hayro-interpret/assets/LICENSE_FOXIT") to "licences/LICENSE-foxit.txt",
+            )
+            files.from(map.keys)
+            targets.set(map.mapKeys { (k, _) -> k.name })
         }
         val icons = tasks.register<LucideIconsTask>("lucideIcons$name") {
             iconsDir.set(File(assetsDir, "icons"))

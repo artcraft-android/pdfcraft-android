@@ -42,8 +42,9 @@ Android app (apps/pdfcraft-android):
 - JNA (https://github.com/java-native-access/jna) — Apache-2.0 (dual-licensed with LGPL-2.1; used
   under Apache-2.0).
 - AndroidX, Jetpack Compose, ExifInterface and kotlinx.coroutines — Apache-2.0.
-- Ocrs text-recognition models (fetched into assets/models by apps/pdfcraft-android/fetch-models.sh,
-  not committed) by Robert Knight — CC-BY-SA-4.0. The app ships them unmodified with their licence.
+- Ocrs text-recognition models (assets/models, committed so the build downloads nothing;
+  apps/pdfcraft-android/fetch-models.sh fetches them again) by Robert Knight — CC-BY-SA-4.0. The app
+  ships them unmodified with their licence.
 
 Required notices:
 

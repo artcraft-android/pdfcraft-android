@@ -364,6 +364,9 @@
     <string name="root_licence_pdfcraft_terms">MIT OR Apache-2.0, by storytold and contributors</string>
     <string name="root_licence_lucide">Lucide icons</string>
     <string name="root_licence_inter">Inter typeface</string>
+    <string name="root_licence_dancing_script">Dancing Script typeface (typed signatures)</string>
+    <string name="root_licence_foxit">Foxit fonts (for PDFs that don\'t embed their standard fonts)</string>
+    <string name="root_licence_cmaps">Adobe CMap resources (for reading Chinese, Japanese and Korean PDFs)</string>
     <string name="root_licence_ocrs">Text recognition models (ocrs)</string>
     <string name="root_licence_ocrs_terms">CC-BY-SA-4.0, Robert Knight; trained on HierText</string>
     <string name="root_licence_rust">hayro, lopdf, boa and the engine\'s other Rust dependencies</string>
