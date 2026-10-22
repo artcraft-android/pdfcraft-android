@@ -10,7 +10,6 @@
   few, many). A string left out shows in English.
 -->
 <resources>
-    <string name="app_name" translatable="false">PdfCraft</string>
     <string name="open_with">Abrir con PdfCraft</string>
 
     <!-- Shared: buttons and words used on many screens -->
@@ -364,6 +363,9 @@
     <string name="root_licence_pdfcraft_terms">MIT OR Apache-2.0, por storytold y colaboradores</string>
     <string name="root_licence_lucide">Iconos Lucide</string>
     <string name="root_licence_inter">Tipografía Inter</string>
+    <string name="root_licence_dancing_script">Tipografía Dancing Script (firmas con el nombre escrito)</string>
+    <string name="root_licence_foxit">Fuentes de Foxit (para los PDF que no incrustan sus fuentes estándar)</string>
+    <string name="root_licence_cmaps">Recursos CMap de Adobe (para leer PDF en chino, japonés y coreano)</string>
     <string name="root_licence_ocrs">Modelos de reconocimiento de texto (ocrs)</string>
     <string name="root_licence_ocrs_terms">CC-BY-SA-4.0, Robert Knight; entrenados con HierText</string>
     <string name="root_licence_rust">hayro, lopdf, boa y el resto de dependencias Rust del motor</string>
@@ -1121,6 +1123,8 @@
     <!-- Translator note: a file handed to the app has no location on the phone -->
     <string name="files_error_no_path">El archivo no tiene ruta.</string>
     <string name="files_error_write">No se pudo escribir el archivo.</string>
+    <string name="files_error_share">No se pudo compartir el archivo.</string>
+    <string name="files_error_share_no_space">No hay almacenamiento libre suficiente para compartir. Libera espacio e inténtalo de nuevo.</string>
     <!-- Translator note: Downloads is the phone's Downloads folder -->
     <string name="files_error_save_downloads">No se pudo guardar el archivo en Descargas.</string>
     <string name="files_error_save_image">No se pudo guardar la imagen.</string>

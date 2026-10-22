@@ -215,7 +215,7 @@ PdfCraft for Android is in beta.
 | Export to Word, RTF, Excel, PowerPoint, JPEG and PNG | ✅ · Word 97 ⬜ |
 | Recognize text | ✅ (the Latin alphabet without accents) |
 | A customizable quick toolbar, upright and sideways layouts, light and dark themes | ✅ |
-| Translations: all of the app's text is ready to translate ([how](#translating)) | ✅ · languages besides English ⬜ |
+| Translations: all of the app's text is ready to translate ([how](#translating)) | ✅ · Spanish ✅ · other languages ⬜ |
 | AI assistant, cloud storage, sharing for review | 🚫 PdfCraft is a local app |
 
 <sub>✅ works today · 🚧 in progress · ⬜ not started · 🚫 not planned</sub>
