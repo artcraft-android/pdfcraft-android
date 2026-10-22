@@ -10,6 +10,7 @@ import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import io.github.artcraftandroid.pdfcraft.R
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 
 /**
@@ -121,22 +122,27 @@ class DocumentFiles(private val context: Context) {
     }
 
     /** A copy of [file] under [name] that other apps may read, and its URI. */
-    fun shareable(file: File, name: String = file.name): Uri {
-        shareDir.listFiles()?.forEach { it.deleteRecursively() }
-        val dir = File(shareDir, System.nanoTime().toString()).apply { mkdirs() }
-        val copy = File(dir, safeName(name))
-        file.copyTo(copy, overwrite = true)
-        return FileProvider.getUriForFile(context, "${context.packageName}.files", copy)
-    }
+    fun shareable(file: File, name: String = file.name): Uri = shareableAll(listOf(file to safeName(name))).first()
 
-    /** Several files to hand to another app at once (pictures of pages), each under its own name. */
+    /**
+     * Copies of [files] that other apps may read (a document, pictures of pages), each under its
+     * own name, and their URIs. The last ones handed out are cleared first. When the copies can't
+     * be made (a full phone has no room for them), the error says so in words.
+     */
     fun shareableAll(files: List<Pair<File, String>>): List<Uri> {
         shareDir.listFiles()?.forEach { it.deleteRecursively() }
-        val dir = File(shareDir, System.nanoTime().toString()).apply { mkdirs() }
-        return files.map { (file, name) ->
-            val copy = File(dir, name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").ifBlank { file.name })
-            file.copyTo(copy, overwrite = true)
-            FileProvider.getUriForFile(context, "${context.packageName}.files", copy)
+        val dir = File(shareDir, System.nanoTime().toString())
+        try {
+            if (!dir.mkdirs()) throw IOException("can't make $dir")
+            return files.map { (file, name) ->
+                val copy = File(dir, name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").ifBlank { file.name })
+                file.copyTo(copy, overwrite = true)
+                FileProvider.getUriForFile(context, "${context.packageName}.files", copy)
+            }
+        } catch (e: IOException) {
+            dir.deleteRecursively()
+            val full = shareDir.usableSpace < files.sumOf { it.first.length() } + 1024 * 1024
+            throw IOException(context.getString(if (full) R.string.files_error_share_no_space else R.string.files_error_share), e)
         }
     }
 

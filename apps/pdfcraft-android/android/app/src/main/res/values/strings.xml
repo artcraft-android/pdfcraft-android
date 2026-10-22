@@ -1124,6 +1124,8 @@
     <!-- Translator note: a file handed to the app has no location on the phone -->
     <string name="files_error_no_path">The file has no path.</string>
     <string name="files_error_write">The file couldn\'t be written.</string>
+    <string name="files_error_share">The file couldn\'t be shared.</string>
+    <string name="files_error_share_no_space">Not enough free storage to share. Free up some space and try again.</string>
     <!-- Translator note: Downloads is the phone's Downloads folder -->
     <string name="files_error_save_downloads">The file couldn\'t be saved to Downloads.</string>
     <string name="files_error_save_image">The image couldn\'t be saved.</string>

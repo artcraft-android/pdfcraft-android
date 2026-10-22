@@ -16,6 +16,7 @@ import io.github.artcraftandroid.pdfcraft.ui.viewer.TextPrompt
 import io.github.artcraftandroid.pdfcraft.ui.viewer.ToolPrefs
 import io.github.artcraftandroid.pdfcraft.ui.viewer.engineType
 import io.github.artcraftandroid.pdfcraft.ui.viewer.hex
+import android.content.ClipData
 import android.content.Intent
 import androidx.compose.runtime.snapshotFlow
 import io.github.artcraftandroid.pdfcraft.ui.viewer.LinkFlash
@@ -492,18 +493,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Share a copy of [doc] through the system's share sheet (saved first). */
+    /** Share a copy of [doc] through the system's share sheet (saved first, with the ink being drawn). */
     fun share(doc: OpenDocument) {
-        viewModelScope.launch {
+        if (doc.controller.tool == ViewerTool.Draw) doc.commitTool?.invoke()
+        handOut {
+            // the ink is queued in the engine: reading the document back waits for it, so the save has it
+            refresh(doc)
             save(doc)
             val uri = withContext(Dispatchers.IO) { files.shareable(doc.file, doc.name) }
-            val send = Intent(Intent.ACTION_SEND)
-                .setType("application/pdf")
-                .putExtra(Intent.EXTRA_STREAM, uri)
-                .putExtra(Intent.EXTRA_SUBJECT, text(R.string.msg_share_subject, doc.title))
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            intents.trySend(Intent.createChooser(send, null))
+            sendIntent(listOf(uri)).putExtra(Intent.EXTRA_SUBJECT, text(R.string.msg_share_subject, doc.title))
         }
+    }
+
+    /**
+     * Hand files to another app through the system's chooser: [make] copies them where other apps
+     * may read them and returns the intent. A failure on the way, such as a file gone or a phone
+     * too full for the copy, is told in a snackbar instead of closing the app.
+     */
+    private fun handOut(make: suspend () -> Intent) {
+        viewModelScope.launch {
+            val intent = try {
+                make()
+            } catch (e: Exception) {
+                tell(e.userMessage)
+                null
+            } ?: return@launch
+            intents.trySend(Intent.createChooser(intent, null))
+        }
+    }
+
+    /** A send intent for [uris], with them as its clip too so the share sheet can show them. */
+    private fun sendIntent(uris: List<Uri>, mime: String = "application/pdf"): Intent {
+        val send = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.first())
+        else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        send.clipData = ClipData(null, arrayOf(mime), ClipData.Item(uris.first())).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
+        return send.setType(mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
     /**
@@ -2000,14 +2024,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         organizing = false
         doc.controller.pagesOpen = false
         if (share) {
-            val uris = withContext(Dispatchers.IO) { files.shareableAll(made) }
-            made.forEach { it.first.delete() }
-            val send = if (uris.size == 1) {
-                Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uris.first())
-            } else {
-                Intent(Intent.ACTION_SEND_MULTIPLE).setType(mime).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+            val uris = try {
+                withContext(Dispatchers.IO) { files.shareableAll(made) }
+            } finally {
+                made.forEach { it.first.delete() }
             }
-            intents.trySend(Intent.createChooser(send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null))
+            intents.trySend(Intent.createChooser(sendIntent(uris, mime), null))
         } else {
             withContext(Dispatchers.IO) {
                 for ((f, name) in made) {
@@ -2368,13 +2390,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Several PDFs to the share sheet at once. */
     fun shareFiles(rows: List<io.github.artcraftandroid.pdfcraft.ui.home.FileRow>) {
-        viewModelScope.launch {
+        handOut {
             val local = rows.mapNotNull { r -> localFileOf(r)?.let { it to r.name } }
-            if (local.isEmpty()) return@launch tell(text(R.string.msg_files_unreadable))
-            val uris = withContext(Dispatchers.IO) { files.shareableAll(local) }
-            val send = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.first())
-            else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
-            intents.trySend(Intent.createChooser(send.setType("application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null))
+            if (local.isEmpty()) error(text(R.string.msg_files_unreadable))
+            sendIntent(withContext(Dispatchers.IO) { files.shareableAll(local) })
         }
     }
 
@@ -2393,10 +2412,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun shareFile(row: io.github.artcraftandroid.pdfcraft.ui.home.FileRow) {
-        viewModelScope.launch {
-            val f = localFileOf(row) ?: return@launch tell(text(R.string.common_file_unreadable))
-            val uri = withContext(Dispatchers.IO) { files.shareable(f, row.name) }
-            intents.trySend(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("application/pdf").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null))
+        handOut {
+            val f = localFileOf(row) ?: error(text(R.string.common_file_unreadable))
+            sendIntent(listOf(withContext(Dispatchers.IO) { files.shareable(f, row.name) }))
         }
     }
 
@@ -2408,10 +2426,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openWith(row: io.github.artcraftandroid.pdfcraft.ui.home.FileRow) {
-        viewModelScope.launch {
-            val f = localFileOf(row) ?: return@launch tell(text(R.string.common_file_unreadable))
+        handOut {
+            val f = localFileOf(row) ?: error(text(R.string.common_file_unreadable))
             val uri = withContext(Dispatchers.IO) { files.shareable(f, row.name) }
-            intents.trySend(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null))
+            Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
     }
 
