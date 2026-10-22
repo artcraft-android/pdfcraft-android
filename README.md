@@ -5,7 +5,7 @@
 <h1 align="center">PdfCraft for Android</h1>
 
 <p align="center">
-  <b>PdfCraft-android is an open-source reimplementation of the Adobe Acrobat Reader Android app, created using the same Rust engine, <a href="https://github.com/storytold/pdfcraft">PdfCraft</a>, as the desktop app, and built with a Kotlin/Jetpack Compose UI framework.</b><br>
+  <b>An Android native open-source PDF reader and editor written in Rust, built on the same engine as the desktop app, <a href="https://github.com/storytold/pdfcraft">PdfCraft</a>, with a Kotlin/Jetpack Compose UI.</b><br>
   Many credits to the original maintainers, <a href="https://github.com/storytold">storytold</a>.
 </p>
 
