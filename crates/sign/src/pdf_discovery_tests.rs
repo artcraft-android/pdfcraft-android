@@ -173,9 +173,7 @@ fn reconstructed_and_unreadable_objects_are_not_cached_as_complete() {
     }
     // A single invalid keyword immediately before endobj is deliberately recovered as
     // Null by parse_indirect. Use a stream without endstream to exercise a real read error.
-    // Its text names /ByteRange: the scan parses only objects that do (a timestamp needs one),
-    // so an unreadable object that could be a timestamp must keep discovery incomplete.
-    let unreadable = fixture(&[STAMP, "<< /Length 0 /ByteRange [0 1 2 1] >>\nstream\nunterminated"]);
+    let unreadable = fixture(&[STAMP, "<< /Length 0 >>\nstream\nunterminated"]);
     assert!(unreadable.repair_log().is_empty());
     assert!(unreadable.try_get(4).is_err());
     assert!(unreadable.scan_objects_checked().any(|(r, object)| r.num == 4 && object.is_err()));

@@ -132,6 +132,60 @@ fn signing_an_existing_field_and_counter_signing() {
     ));
 }
 
+/// Issue #1328: a signature field whose /V is null, directly or through a reference, is unsigned:
+/// it is listed as unsigned and can be signed by name.
+#[test]
+fn a_field_with_a_null_value_is_unsigned_and_can_be_signed() {
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let field = pdfcraft_cos::ObjRef { num: 6, generation: 0 };
+    let direct = edit_after(&fixture(), |doc| doc.update_dict(field, |d| d.set(b"V".to_vec(), Object::Null)).unwrap());
+    let indirect = edit_after(&fixture(), |doc| {
+        let null = doc.add(Object::Null);
+        doc.update_dict(field, |d| d.set(b"V".to_vec(), Object::Ref(null))).unwrap();
+    });
+    for (what, unsigned) in [("direct null", direct), ("indirect null", indirect)] {
+        let doc = open(&unsigned);
+        assert!(doc.get(field).as_dict().is_some_and(|d| d.contains(b"V")), "{what}: the fixture keeps its /V");
+        let listed = signatures(&doc, &unsigned, &TrustStore::default());
+        assert!(listed.iter().any(|s| s.field == "Approval" && !s.signed), "{what}");
+        let signed =
+            pdfcraft_sign::sign(&doc, &id, &SignOptions { field: Some("Approval".into()), ..opts() }).unwrap_or_else(|e| panic!("{what}: {e:?}"));
+        let listed = signatures(&open(&signed), &signed, &TrustStore::default());
+        assert!(listed.iter().any(|s| s.field == "Approval" && s.signed), "{what}");
+        assert!(!listed.iter().any(|s| s.field == "Signature1"), "{what}: no new field");
+    }
+}
+
+/// Follow-up to #1374: a signature field whose /V is neither null nor a signature dictionary is
+/// refused by name with an error saying so, instead of being overwritten or called signed.
+#[test]
+fn a_field_whose_value_is_not_a_signature_is_refused_by_name() {
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let field = pdfcraft_cos::ObjRef { num: 6, generation: 0 };
+    let values = [
+        ("empty string", Object::String(PdfString::literal(""))),
+        ("number", Object::Int(5)),
+        ("name", Object::name("Off")),
+        ("array", Object::Array(Vec::new())),
+    ];
+    for (what, value) in values {
+        let direct = edit_after(&fixture(), |doc| doc.update_dict(field, |d| d.set(b"V".to_vec(), value.clone())).unwrap());
+        let indirect = edit_after(&fixture(), |doc| {
+            let v = doc.add(value.clone());
+            doc.update_dict(field, |d| d.set(b"V".to_vec(), Object::Ref(v))).unwrap();
+        });
+        for (how, bytes) in [("direct", direct), ("indirect", indirect)] {
+            let doc = open(&bytes);
+            let listed = signatures(&doc, &bytes, &TrustStore::default());
+            assert!(listed.iter().any(|s| s.field == "Approval" && !s.signed), "{how} {what}");
+            match pdfcraft_sign::sign(&doc, &id, &SignOptions { field: Some("Approval".into()), ..opts() }) {
+                Err(SignError::Pdf(e)) => assert_eq!(e, "the value of the field \"Approval\" is not a signature", "{how} {what}"),
+                other => panic!("{how} {what}: {:?}", other.map(|b| b.len())),
+            }
+        }
+    }
+}
+
 /// Append a revision that changes object `num` with `f`.
 fn edit_after(signed: &[u8], f: impl FnOnce(&mut Document)) -> Vec<u8> {
     let mut doc = open(signed);
@@ -888,7 +942,7 @@ fn a_dss_entry_does_not_make_the_object_it_names_part_of_the_store() {
 #[test]
 fn an_existing_dictionary_is_not_a_store_part_because_the_store_names_it() {
     // The font dictionary (object 5), rewritten and then listed as the store, its /VRI, a VRI
-    // entry, or simply labelled /Type /DSS.
+    // entry, or simply labelled /Type /DSS. The page draws it, so each is page content (#1787).
     let rewrite_font = |doc: &mut Document, extra: Option<(&str, Object)>| {
         let mut d = dict_of(vec![("Type", Object::name("Font")), ("Subtype", Object::name("Type1")), ("BaseFont", Object::name("Courier"))]);
         if let Some((k, v)) = extra {
@@ -896,19 +950,19 @@ fn an_existing_dictionary_is_not_a_store_part_because_the_store_names_it() {
         }
         doc.set(pdfcraft_cos::ObjRef { num: 5, generation: 0 }, Object::Dict(d));
     };
-    assert_refused_at_every_level(&fixture(), "other changes", |doc| {
+    assert_refused_at_every_level(&fixture(), "page content", |doc| {
         rewrite_font(doc, Some(("Type", Object::name("DSS"))));
     });
-    assert_refused_at_every_level(&fixture(), "other changes", |doc| {
+    assert_refused_at_every_level(&fixture(), "page content", |doc| {
         set_dss(doc, oref(5));
         rewrite_font(doc, None);
     });
-    assert_refused_at_every_level(&fixture(), "other changes", |doc| {
+    assert_refused_at_every_level(&fixture(), "page content", |doc| {
         set_dss(doc, Object::Dict(dict_of(vec![("VRI", oref(5))])));
         rewrite_font(doc, None);
     });
     // An existing dictionary with only DSS-looking keys that the signed file never had as a store.
-    assert_refused_at_every_level(&fixture(), "other changes", |doc| {
+    assert_refused_at_every_level(&fixture(), "page content", |doc| {
         doc.set(
             pdfcraft_cos::ObjRef { num: 5, generation: 0 },
             Object::Dict(dict_of(vec![("Type", Object::name("Font")), ("Cert", Object::Array(vec![]))])),
@@ -931,7 +985,8 @@ fn an_existing_array_stays_what_it_is_when_the_store_points_at_it() {
 #[test]
 fn a_dictionary_labelled_metadata_is_not_a_metadata_change() {
     // Only the catalog's XMP stream is metadata (a stream, not a dictionary a label was put on).
-    assert_refused_at_every_level(&fixture(), "other changes", |doc| {
+    // The dictionary is the page's font, so the rewrite is page content (#1787).
+    assert_refused_at_every_level(&fixture(), "page content", |doc| {
         doc.set(
             pdfcraft_cos::ObjRef { num: 5, generation: 0 },
             Object::Dict(dict_of(vec![
@@ -988,9 +1043,10 @@ fn fixture_with_stream_7(catalog_extra: &str, drawn: bool, dict: &str, body: &[u
 #[test]
 fn a_stream_already_labelled_metadata_when_signed_is_not_metadata_unless_the_catalog_names_it() {
     // A Form XObject the page draws, labelled /Type /Metadata before signing (the renderer ignores
-    // /Type). Rewriting it later changes what the page shows, so it is not a metadata change.
+    // /Type). Rewriting it later changes what the page shows, so it is not a metadata change
+    // but page content (#1787).
     let base = fixture_with_stream_7("", true, "/Type /Metadata /Subtype /Form /BBox [0 0 300 300]", b"0 0 1 rg 10 10 100 100 re f");
-    assert_refused_at_every_level(&base, "other changes", |doc| {
+    assert_refused_at_every_level(&base, "page content", |doc| {
         let d = dict_of(vec![
             ("Type", Object::name("Metadata")),
             ("Subtype", Object::name("Form")),
@@ -1139,7 +1195,8 @@ fn a_form_xobject_relabelled_as_file_plumbing_is_still_judged() {
             });
             let s = signatures(&open(&edited), &edited, &trust).into_iter().find(|s| s.signed).unwrap();
             assert_eq!(s.status, Status::Invalid, "{certify:?} /{label}: {:?}", s.details);
-            assert!(matches!(&s.modification, Modification::Disallowed(k) if k.contains(&"other changes")), "{:?}", s.modification);
+            // The page draws the XObject: its rewrite is page content (#1787).
+            assert!(matches!(&s.modification, Modification::Disallowed(k) if k.contains(&"page content")), "{:?}", s.modification);
         }
     }
 }
@@ -1584,10 +1641,15 @@ fn validates_the_legacy_adbe_x509_rsa_sha1_format() {
 /// `fixture()` protected with an empty user password (opens without asking, like most
 /// "secured" forms) and an owner password, then saved.
 fn protected(alg: pdfcraft_cos::Algorithm, permissions: i32) -> Vec<u8> {
+    protected_with(alg, "", permissions)
+}
+
+/// `fixture()` protected with the user password `user` and an owner password, then saved.
+fn protected_with(alg: pdfcraft_cos::Algorithm, user: &str, permissions: i32) -> Vec<u8> {
     let mut doc = open(&fixture());
     doc.set_encryption(&pdfcraft_cos::NewEncryption {
         algorithm: alg,
-        user_password: "",
+        user_password: user,
         owner_password: "owner",
         permissions,
         encrypt_metadata: true,
@@ -1595,6 +1657,38 @@ fn protected(alg: pdfcraft_cos::Algorithm, permissions: i32) -> Vec<u8> {
     })
     .unwrap();
     pdfcraft_cos::write_full(&doc, &SaveOptions::default()).unwrap()
+}
+
+/// #1808: a document that asks for its user password, signed and then counter-signed. The
+/// first signature no longer covers the whole file, so its revision is reopened to classify the
+/// change; that revision is encrypted too, and used to be unreadable without the password,
+/// which made the first signature Invalid. It opens with the document's own key.
+#[test]
+fn a_user_password_document_keeps_its_earlier_signature_valid_when_counter_signed() {
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let id2 = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone(), id2.certificate.clone()] };
+    for alg in ALL_ALGORITHMS {
+        let base = protected_with(alg, "secret", -1);
+        assert!(Document::open_with_password(Arc::new(base.clone()), None).is_err(), "{alg:?}: the file asks for its password");
+        let signed = pdfcraft_sign::sign(&open_pw(&base, Some("secret")), &id, &opts()).unwrap();
+        let both = pdfcraft_sign::sign(&open_pw(&signed, Some("secret")), &id2, &SignOptions { field: Some("Approval".into()), ..opts() }).unwrap();
+        let sigs = signatures(&open_pw(&both, Some("secret")), &both, &trust);
+        let first = sigs.iter().find(|s| s.field == "Signature1").unwrap();
+        assert_eq!(first.modification, Modification::Allowed(vec![kind::SIGNATURE]), "{alg:?}: {:?}", first.details);
+        assert_eq!(first.status, Status::Valid, "{alg:?}: {:?}", first.details);
+        let second = sigs.iter().find(|s| s.field == "Approval").unwrap();
+        assert_eq!((second.status, second.revision), (Status::Valid, 3), "{alg:?}: {:?}", second.details);
+        // Opened as owner, the same.
+        let sigs = signatures(&open_pw(&both, Some("owner")), &both, &trust);
+        assert!(sigs.iter().filter(|s| s.signed).all(|s| s.status == Status::Valid), "{alg:?}");
+        // Tampering inside the first signature's range still breaks both.
+        let mut tampered = both.clone();
+        let at = base.len() / 2;
+        tampered[at] ^= 1;
+        let tampered_sigs = signatures(&open_pw(&tampered, Some("secret")), &tampered, &trust);
+        assert!(tampered_sigs.iter().filter(|s| s.signed).all(|s| s.status == Status::Invalid), "{alg:?}");
+    }
 }
 
 fn open_pw(b: &[u8], pw: Option<&str>) -> Document {
@@ -1761,6 +1855,58 @@ fn visible_appearance_text_helvetica_cannot_draw_is_refused() {
     assert_eq!(s.reason.as_deref(), Some("同意此文件"));
 }
 
+/// The labels are the caller's words (a translation), so they are checked as the details are: a
+/// label Helvetica can't draw is refused with the label and the character, never drawn as `?`.
+/// Only labels that are drawn count: one whose detail is hidden, or empty, or with the labels
+/// turned off or the signature invisible, signs. Labels it can draw are what the stamp says.
+#[test]
+fn appearance_labels_helvetica_cannot_draw_are_refused() {
+    use pdfcraft_sign::{Appearance, AppearanceLabels};
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    assert_eq!(AppearanceLabels::default().first_undrawable(), None, "the English labels are drawable");
+    let chinese = AppearanceLabels { signed_by: "数字签名者".into(), reason: "原因：".into(), ..AppearanceLabels::default() };
+    assert_eq!(chinese.first_undrawable(), Some(("signed_by", '数')));
+    let sign = |labels: AppearanceLabels, appearance: Appearance, o: SignOptions| {
+        pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { appearance_labels: labels, appearance, ..o })
+    };
+
+    // The name is shown with its label (the default appearance): refused, saying which and what.
+    let err = sign(chinese.clone(), Appearance::default(), opts()).unwrap_err();
+    let m = err.to_string();
+    assert!(matches!(err, SignError::Unsupported(_)), "{err:?}");
+    assert!(m.contains("\"数\" (U+6570)") && m.contains("the signed_by label") && m.contains("leave the labels out"), "{m}");
+    let russian_date = AppearanceLabels { date: "Дата: ".into(), ..AppearanceLabels::default() };
+    let m = sign(russian_date.clone(), Appearance::default(), opts()).unwrap_err().to_string();
+    assert!(m.contains("the date label") && m.contains("U+0414"), "{m}");
+    let reason_only = AppearanceLabels { reason: "原因：".into(), ..AppearanceLabels::default() };
+    let shown = Appearance { reason: true, ..Appearance::default() };
+    assert!(sign(reason_only.clone(), shown.clone(), opts()).unwrap_err().to_string().contains("the reason label"));
+
+    // Not drawn: the reason hidden, or empty; the labels off; the signature invisible.
+    sign(reason_only.clone(), Appearance::default(), opts()).unwrap();
+    sign(reason_only.clone(), shown.clone(), SignOptions { reason: None, ..opts() }).unwrap();
+    sign(reason_only, shown, SignOptions { reason: Some(String::new()), ..opts() }).unwrap();
+    sign(chinese.clone(), Appearance { labels: false, ..Appearance::default() }, opts()).unwrap();
+    sign(russian_date, Appearance { date: false, ..Appearance::default() }, opts()).unwrap();
+    sign(chinese, Appearance::default(), SignOptions { rect: None, ..opts() }).unwrap();
+
+    // Labels Helvetica can draw are stamped as given, in place of the English ones.
+    let german = AppearanceLabels {
+        signed_by: "Digital signiert von".into(),
+        distinguished_name: "DN: ".into(),
+        reason: "Grund: ".into(),
+        location: "Ort: ".into(),
+        date: "Datum: ".into(),
+    };
+    let all = Appearance { reason: true, location: true, ..Appearance::default() };
+    let signed = sign(german, all, opts()).unwrap();
+    let (content, _) = appearance_of(&signed, "Signature1");
+    for word in ["(Digital", "(Grund:", "(Ort:", "(Datum:"] {
+        assert!(content.contains(word), "{word}: {content}");
+    }
+    assert!(!content.contains("Reason") && !content.contains("Date:") && !content.contains('?'), "{content}");
+}
+
 /// Every sentence this crate says about a signature is listed in `WORDINGS`, and every sentence on
 /// that list is one it still says: the details are written as `Detail::plain`/`Detail::of`, the
 /// sentences the modules that read a signature word for themselves are pushed as notes and quirks,
@@ -1845,4 +1991,211 @@ fn details_say_themselves() {
         };
         assert_eq!(holes, wanted, "{:?} has {holes} holes", d.pattern);
     }
+}
+
+/// `signed` with one more revision appended by hand: a new definition of object 4 (the page's
+/// content stream) that draws `text`, then a cross-reference table section whose subsections are
+/// what `xref` returns for the offset of that definition. The section continues the signed chain.
+fn append_content_revision(signed: &[u8], text: &str, xref: impl Fn(usize) -> String) -> Vec<u8> {
+    let at = signed.windows(9).rposition(|w| w == b"startxref").unwrap() + 9;
+    let prev: String = signed[at..].iter().skip_while(|b| b.is_ascii_whitespace()).take_while(|b| b.is_ascii_digit()).map(|b| *b as char).collect();
+    let mut out = signed.to_vec();
+    let content = format!("BT /F1 14 Tf 20 250 Td ({text}) Tj ET");
+    let object = out.len();
+    out.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n{content}\nendstream\nendobj\n", content.len()).as_bytes());
+    let section = out.len();
+    out.extend_from_slice(
+        format!("xref\n{}trailer\n<< /Size 60 /Root 1 0 R /Prev {prev} >>\nstartxref\n{section}\n%%EOF\n", xref(object)).as_bytes(),
+    );
+    out
+}
+
+fn xref_entry(offset: usize) -> String {
+    format!("{offset:010} 00000 n \n")
+}
+
+/// The reader that judges changes and the renderer that draws the page resolve some
+/// cross-reference entries differently. A revision appended after signing can redefine the page's
+/// content and give the object an entry the reader sets aside (an in-use entry at offset 0, or
+/// a second entry after one that still names the signed object): the reader then keeps comparing
+/// the signed object with itself while the page shows the new one. Such an entry is never a
+/// permitted change.
+#[test]
+fn a_cross_reference_entry_the_reader_sets_aside_does_not_hide_new_page_content() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    for certify in LEVELS {
+        let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { certify, ..opts() }).unwrap();
+        // Where the signed revision keeps the page's content stream.
+        let signed_at = signed.windows(8).position(|w| w == b"\n4 0 obj").unwrap() + 1;
+        // Each writes the section's subsections, given where the new object 4 was put.
+        type Subsections = Box<dyn Fn(usize) -> String>;
+        let attacks: [(&str, Subsections); 3] = [
+            ("an in-use entry at offset 0", Box::new(|_| format!("4 1\n{}", xref_entry(0)))),
+            ("a second entry for the object", Box::new(move |new| format!("4 1\n{}4 1\n{}", xref_entry(signed_at), xref_entry(new)))),
+            // The plain case, which was always caught: one entry naming the new object.
+            ("an ordinary entry", Box::new(|new| format!("4 1\n{}", xref_entry(new)))),
+        ];
+        for (name, xref) in attacks {
+            let edited = append_content_revision(&signed, "Forged text", xref);
+            let s = signatures(&open(&edited), &edited, &trust).into_iter().find(|s| s.signed).unwrap();
+            assert_eq!(s.status, Status::Invalid, "{certify:?}, {name}: {:?}", s.details);
+            assert!(
+                matches!(&s.modification, Modification::Disallowed(k) if k.contains(&"page content")),
+                "{certify:?}, {name}: {:?}",
+                s.modification
+            );
+        }
+    }
+}
+
+/// An entry that does not point at the object it names leaves the reader to find the object by
+/// searching the file. What it finds may equal the signed object, yet another reader may search
+/// differently: the object cannot be called unchanged.
+#[test]
+fn a_cross_reference_entry_that_misses_its_object_is_not_an_unchanged_object() {
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    // A copy of the signed content, named by an entry two bytes into its `4 0 obj` header.
+    let edited = append_content_revision(&signed, "Contract text", |new| format!("4 1\n{}", xref_entry(new + 2)));
+    let doc = open(&edited);
+    assert!(!doc.xref_entry_is_exact(4) && doc.xref_entry_is_exact(3));
+    let s = signatures(&doc, &edited, &trust).into_iter().find(|s| s.signed).unwrap();
+    assert_eq!(s.status, Status::Invalid, "{:?}", s.details);
+    assert!(matches!(&s.modification, Modification::Disallowed(k) if k.contains(&"other changes")), "{:?}", s.modification);
+
+    // The same copy under an entry that does point at it is the unchanged object it looks like.
+    let honest = append_content_revision(&signed, "Contract text", |new| format!("4 1\n{}", xref_entry(new)));
+    let s = signatures(&open(&honest), &honest, &trust).into_iter().find(|s| s.signed).unwrap();
+    assert_eq!(s.status, Status::Valid, "{:?}", s.details);
+}
+
+/// `fixture()` with the page's resources indirect: object 7 is the resources dictionary, 8 its
+/// `/Font` dictionary, 9 an `/ExtGState` the content uses, and 5 the font as before.
+fn fixture_with_indirect_resources() -> Vec<u8> {
+    let objs: Vec<&[u8]> = vec![
+        b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] >> >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R /Resources 7 0 R /Annots [6 0 R] >>",
+        b"<< /Length 52 >>\nstream\n/GS1 gs BT /F1 14 Tf 20 250 Td (Contract text) Tj ET\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Annot /Subtype /Widget /FT /Sig /T (Approval) /Rect [150 20 280 70] /P 3 0 R /F 4 >>",
+        b"<< /Font 8 0 R /ExtGState << /GS1 9 0 R >> >>",
+        b"<< /F1 5 0 R >>",
+        b"<< /Type /ExtGState /ca 1 >>",
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// A signed page's resources are judged by the role they held when signed, not by the keys a
+/// later revision writes into them (#1787): rewriting the page's resources dictionary, a
+/// category dictionary, a font or a graphics state changes what the page shows, however the
+/// new version is labelled (/FT, /DR, /T + /Kids, /Subtype /Widget, /Type /Annot + /Rect, which
+/// otherwise read as form filling or a comment, permitted under P=2 and P=3). A category
+/// dictionary that only gained a name changes nothing drawn and is judged as before.
+#[test]
+fn rewritten_page_resources_are_page_content_whatever_keys_they_carry() {
+    /// Replace object `num` with a dictionary; each attack runs once per certification level,
+    /// so the entries are cloned into each.
+    fn set(num: u32, entries: Vec<(&'static str, Object)>) -> impl Fn(&mut Document) {
+        move |doc| doc.set(pdfcraft_cos::ObjRef { num, generation: 0 }, Object::Dict(dict_of(entries.clone())))
+    }
+    /// A second font, so a name can be made to resolve elsewhere.
+    fn courier(doc: &mut Document) -> pdfcraft_cos::ObjRef {
+        doc.add(Object::Dict(dict_of(vec![
+            ("Type", Object::name("Font")),
+            ("Subtype", Object::name("Type1")),
+            ("BaseFont", Object::name("Courier")),
+        ])))
+    }
+    // The resources dictionary: another font under the same name, plus /FT.
+    assert_refused_at_every_level(&fixture_with_indirect_resources(), "page content", |doc| {
+        let f = courier(doc);
+        set(
+            7,
+            vec![
+                ("Font", Object::Dict(dict_of(vec![("F1", Object::Ref(f))]))),
+                ("ExtGState", Object::Dict(dict_of(vec![("GS1", oref(9))]))),
+                ("FT", Object::name("Tx")),
+            ],
+        )(doc);
+    });
+    // The /Font dictionary: the name now resolves elsewhere, plus /DR.
+    assert_refused_at_every_level(&fixture_with_indirect_resources(), "page content", |doc| {
+        let f = courier(doc);
+        set(8, vec![("F1", Object::Ref(f)), ("DR", Object::Dict(dict_of(vec![])))])(doc);
+    });
+    // The graphics state: everything drawn through it becomes invisible, plus /T and /Kids.
+    assert_refused_at_every_level(
+        &fixture_with_indirect_resources(),
+        "page content",
+        set(
+            9,
+            vec![
+                ("Type", Object::name("ExtGState")),
+                ("ca", Object::Real(0.0)),
+                ("T", Object::String(PdfString::literal("x"))),
+                ("Kids", Object::Array(vec![])),
+            ],
+        ),
+    );
+    // The font itself, relabelled a widget.
+    assert_refused_at_every_level(
+        &fixture_with_indirect_resources(),
+        "page content",
+        set(5, vec![("Type", Object::name("Font")), ("BaseFont", Object::name("Courier")), ("Subtype", Object::name("Widget"))]),
+    );
+    // The resources dictionary relabelled a comment (permitted under P=3 and by an approval signature).
+    assert_refused_at_every_level(&fixture_with_indirect_resources(), "page content", |doc| {
+        let f = courier(doc);
+        set(
+            7,
+            vec![
+                ("Type", Object::name("Annot")),
+                ("Subtype", Object::name("Square")),
+                ("Rect", Object::Array(vec![Object::Int(0), Object::Int(0), Object::Int(10), Object::Int(10)])),
+                ("Font", Object::Dict(dict_of(vec![("F1", Object::Ref(f))]))),
+            ],
+        )(doc);
+    });
+    // The same page resources inline in the page keep being page content through the page itself.
+    assert_refused_at_every_level(&fixture(), "page content", |doc| {
+        let f = courier(doc);
+        doc.update_dict(pdfcraft_cos::ObjRef { num: 3, generation: 0 }, |page| {
+            page.set(b"Resources".to_vec(), Object::Dict(dict_of(vec![("Font", Object::Dict(dict_of(vec![("F1", Object::Ref(f))])))])));
+        })
+        .unwrap();
+    });
+
+    // Positive control: a /Font dictionary that only gained a name changes nothing the signed
+    // content draws, so it is not page content (it is still an unclassified change, refused as
+    // "other", as before).
+    let id = pkcs12::open(&data("rsa-aes.p12"), "test").unwrap();
+    let trust = TrustStore { certs: vec![id.certificate.clone()] };
+    let signed = pdfcraft_sign::sign(&open(&fixture_with_indirect_resources()), &id, &SignOptions { certify: Some(3), ..opts() }).unwrap();
+    let grown = edit_after(&signed, |doc| {
+        let f = courier(doc);
+        set(8, vec![("F1", oref(5)), ("F2", Object::Ref(f))])(doc);
+    });
+    let s = signatures(&open(&grown), &grown, &trust).into_iter().find(|s| s.signed).unwrap();
+    assert!(
+        matches!(&s.modification, Modification::Disallowed(k) if !k.contains(&"page content") && k.contains(&"other changes")),
+        "{:?}",
+        s.modification
+    );
 }

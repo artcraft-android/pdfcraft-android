@@ -370,10 +370,10 @@ fn signs_with_a_digital_id_and_trusts_its_signer() {
     let s = MobileSession::new();
     let dir = scratch();
     let id = dir.join("me.p12").to_string_lossy().into_owned();
-    let made = json!({ "name": "Test Signer", "email": "signer@example.com", "password": "secret1", "path": id });
+    let made = json!({ "name": "Test Signer", "email": "signer@example.com", "password": "secret12", "path": id });
     s.execute("sign_id_create".into(), made.to_string()).unwrap();
     // the file's certificate, and a wrong password told apart
-    let info = digital_id_info(id.clone(), "secret1".into()).unwrap();
+    let info = digital_id_info(id.clone(), "secret12".into()).unwrap();
     assert_eq!(info.name, "Test Signer");
     assert_eq!(info.email.as_deref(), Some("signer@example.com"));
     assert!(info.self_signed && info.valid_to > info.valid_from && info.problem.is_none());
@@ -388,7 +388,7 @@ fn signs_with_a_digital_id_and_trusts_its_signer() {
     let doc = s.open(path.clone(), None).unwrap().id;
     assert!(s.signer_certificate(doc, "Signature1".into()).unwrap().is_none());
     let args =
-        json!({ "doc": doc, "id": id, "password": "secret1", "page": 1, "rect": [72, 72, 252, 122], "graphic": { "text": "Test" }, "out": path });
+        json!({ "doc": doc, "id": id, "password": "secret12", "page": 1, "rect": [72, 72, 252, 122], "graphic": { "text": "Test" }, "out": path });
     let out: Value = serde_json::from_str(&s.execute("sign_document".into(), args.to_string()).unwrap()).unwrap();
     let field = out["signature"]["field"].as_str().unwrap().to_string();
     assert_eq!(out["signature"]["status"], "unknown");

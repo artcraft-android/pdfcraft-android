@@ -658,7 +658,7 @@ pub fn tools() -> Vec<ToolDef> {
                 "country": { "type": "string", "description": "Two-letter country code." },
                 "key": { "type": "string", "enum": ["rsa2048", "rsa3072", "rsa4096", "p256"] },
                 "years": { "type": "integer", "minimum": 1, "maximum": 50 },
-                "password": { "type": "string", "minLength": 6 },
+                "password": { "type": "string", "minLength": pdfcraft_engine::sign::pkcs12::MIN_PASSWORD_CHARS },
                 "path": { "type": "string", "description": "The .p12 file to write." },
             }),
             &["name", "password", "path"],
@@ -671,7 +671,7 @@ pub fn tools() -> Vec<ToolDef> {
             .ro()
             .cmd("sign.digital")
             .with(schema(json!({}), &[])),
-        t("sign_document", "Sign a document", "Sign with a digital ID (a .p12/.pfx path, or on macOS a Keychain identity: \"keychain:<common name or fingerprint>\" from sign_keychain_ids, or on Windows a store identity: \"windows:<common name or fingerprint>\" from sign_windows_ids) and save the signed file to `out` (signing always saves, as in Acrobat; the document then shows the signed file). Sign an existing empty signature field (`field`), or a new one on `page` at `rect` (omit rect for an invisible signature). certify: no_changes, form_fill or comments makes a certification signature. graphic shows a picture where the signer's name would be large (Acrobat: Configure Signature Appearance): {\"image\": path} (PNG or JPEG), {\"text\": name} (typed in the Fill & Sign script font) or {\"strokes\": [[[x, y], …], …]} (y up, the drawing pad 1 wide); it needs a visible signature. PAdES B-B, SHA-256 (SHA-384 for P-384 keys).")
+        t("sign_document", "Sign a document", "Sign with a digital ID (a .p12/.pfx path, or on macOS a Keychain identity: \"keychain:<common name or fingerprint>\" from sign_keychain_ids, or on Windows a store identity: \"windows:<common name or fingerprint>\" from sign_windows_ids) and save the signed file to `out` (signing always saves, as in Acrobat; the document then shows the signed file). Sign an existing empty signature field (`field`), or a new one on `page` at `rect` (omit rect for an invisible signature). certify: no_changes, form_fill or comments makes a certification signature. graphic shows a picture where the signer's name would be large (Acrobat: Configure Signature Appearance): {\"image\": path} (PNG or JPEG), {\"text\": name} (typed in the Fill & Sign script font) or {\"strokes\": [[[x, y], …], …]} (y up, the drawing pad 1 wide); it needs a visible signature. appearance chooses what a visible signature shows (default: name, date and labels; reason, location and distinguished_name are off unless turned on). labels gives the words of its labels, e.g. in another language (default English: \"Digitally signed by\", \"DN: \", \"Reason: \", \"Location: \", \"Date: \"; include the separator); each must be in Western European characters (Windows-1252), the only ones the signature's font draws, or the call is refused naming the label and character. PAdES B-B, SHA-256 (SHA-384 for P-384 keys).")
             .cmd("sign.digital")
             .with(schema(
                 json!({
@@ -695,6 +695,31 @@ pub fn tools() -> Vec<ToolDef> {
                         },
                         "minProperties": 1,
                         "maxProperties": 1,
+                    },
+                    "appearance": {
+                        "type": "object",
+                        "description": "What a visible signature shows; items not given keep their default.",
+                        "properties": {
+                            "name": { "type": "boolean", "description": "Default true." },
+                            "date": { "type": "boolean", "description": "Default true." },
+                            "reason": { "type": "boolean", "description": "Default false." },
+                            "location": { "type": "boolean", "description": "Default false." },
+                            "distinguished_name": { "type": "boolean", "description": "Default false." },
+                            "labels": { "type": "boolean", "description": "Default true." },
+                        },
+                        "additionalProperties": false,
+                    },
+                    "labels": {
+                        "type": "object",
+                        "description": "The words of a visible signature's labels (at most 200 characters each, Western European characters only); labels not given stay English.",
+                        "properties": {
+                            "signed_by": { "type": "string", "description": "Above the name. Default \"Digitally signed by\"." },
+                            "distinguished_name": { "type": "string", "description": "Before the certificate's subject. Default \"DN: \"." },
+                            "reason": { "type": "string", "description": "Default \"Reason: \"." },
+                            "location": { "type": "string", "description": "Default \"Location: \"." },
+                            "date": { "type": "string", "description": "Default \"Date: \"." },
+                        },
+                        "additionalProperties": false,
                     },
                     "out": { "type": "string", "description": "Where to save the signed document." },
                 }),

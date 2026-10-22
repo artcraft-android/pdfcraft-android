@@ -17,6 +17,62 @@ fn time(secs: i64) -> sign::Time {
     sign::Time::from_unix(secs)
 }
 
+/// The longest label `sign_document` takes (characters): a label is a few words.
+const MAX_LABEL_CHARS: usize = 200;
+
+/// `appearance`: which items the visible signature shows; those not given keep the default
+/// (name, date and labels on; reason, location and distinguished name off).
+fn appearance_arg(v: &Value) -> Result<sign::Appearance> {
+    const KEYS: &str = "name, date, reason, location, distinguished_name, labels";
+    let o = v.as_object().ok_or_else(|| bad(format!("appearance must be an object of true/false items ({KEYS})")))?;
+    let mut shown = sign::Appearance::default();
+    for (key, value) in o {
+        let on = value.as_bool().ok_or_else(|| bad(format!("appearance.{key} must be true or false")))?;
+        let item = match key.as_str() {
+            "name" => &mut shown.name,
+            "date" => &mut shown.date,
+            "reason" => &mut shown.reason,
+            "location" => &mut shown.location,
+            "distinguished_name" => &mut shown.distinguished_name,
+            "labels" => &mut shown.labels,
+            other => return Err(bad(format!("unknown appearance item {other:?} ({KEYS})"))),
+        };
+        *item = on;
+    }
+    Ok(shown)
+}
+
+/// `labels`: the words of the visible signature's labels; those not given keep the English. Each
+/// must be drawable in the signature's font. Nobody sees a preview here, so a label it can't draw
+/// is refused even when this signature doesn't show it.
+fn labels_arg(v: &Value) -> Result<sign::AppearanceLabels> {
+    const KEYS: &str = "signed_by, distinguished_name, reason, location, date";
+    let o = v.as_object().ok_or_else(|| bad(format!("labels must be an object of strings ({KEYS})")))?;
+    let mut labels = sign::AppearanceLabels::default();
+    for (key, value) in o {
+        let text = value.as_str().ok_or_else(|| bad(format!("labels.{key} must be a string")))?;
+        if text.chars().count() > MAX_LABEL_CHARS {
+            return Err(bad(format!("labels.{key} is longer than {MAX_LABEL_CHARS} characters")));
+        }
+        let label = match key.as_str() {
+            "signed_by" => &mut labels.signed_by,
+            "distinguished_name" => &mut labels.distinguished_name,
+            "reason" => &mut labels.reason,
+            "location" => &mut labels.location,
+            "date" => &mut labels.date,
+            other => return Err(bad(format!("unknown label {other:?} ({KEYS})"))),
+        };
+        *label = text.to_string();
+    }
+    if let Some((field, c)) = labels.first_undrawable() {
+        return Err(bad(format!(
+            "labels.{field}: {}",
+            pdfcraft_engine::undrawable_message(&format!("the {field} label of the visible signature"), c)
+        )));
+    }
+    Ok(labels)
+}
+
 pub(crate) fn cert_json(c: &Certificate) -> Value {
     json!({
         "name": c.display_name(),
@@ -89,8 +145,8 @@ impl Automation {
             return Err(bad("name must not be empty"));
         }
         let password = a.str("password")?;
-        if password.chars().count() < 6 {
-            return Err(bad("the password must have at least 6 characters"));
+        if password.chars().count() < sign::pkcs12::MIN_PASSWORD_CHARS {
+            return Err(bad(format!("the password must have at least {} characters", sign::pkcs12::MIN_PASSWORD_CHARS)));
         }
         let path = self.resolve(a.str("path")?, true)?;
         let key = match a.opt_str("key")?.unwrap_or("rsa2048") {
@@ -177,6 +233,17 @@ impl Automation {
             Some(g) if rect.is_none() && field.is_none() => return Err(bad(format!("graphic {g} needs a visible signature: pass rect or field"))),
             Some(g) => Some(self.signature_graphic(g)?),
         };
+        let visible = rect.is_some() || field.is_some();
+        let appearance = match a.get("appearance") {
+            None | Some(Value::Null) => sign::Appearance::default(),
+            Some(_) if !visible => return Err(bad("appearance needs a visible signature: pass rect or field")),
+            Some(v) => appearance_arg(v)?,
+        };
+        let appearance_labels = match a.get("labels") {
+            None | Some(Value::Null) => sign::AppearanceLabels::default(),
+            Some(_) if !visible => return Err(bad("labels needs a visible signature: pass rect or field")),
+            Some(v) => labels_arg(v)?,
+        };
         let out = self.resolve(a.str("out")?, true)?;
         let opts = SignOptions {
             field,
@@ -186,6 +253,8 @@ impl Automation {
             location: a.opt_str("location")?.map(str::to_string),
             contact: a.opt_str("contact")?.map(str::to_string),
             certify,
+            appearance,
+            appearance_labels,
             graphic,
             ..SignOptions::default()
         };

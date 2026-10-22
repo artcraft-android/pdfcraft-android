@@ -231,11 +231,15 @@ impl Extensions {
                     self.authority_key_id = aki.children().ok().and_then(|c| c.into_iter().find(|t| t.tag == tag::ctx(0))).map(|t| t.value.to_vec());
                 }
             }
-            // ExtendedKeyUsage: a SEQUENCE OF OID.
+            // ExtendedKeyUsage: a SEQUENCE OF OID. Like keyUsage, one that is present restricts
+            // the key even when it doesn't parse: an unreadable one allows no purpose at all.
             "2.5.29.37" => {
-                if let Ok(eku) = Tlv::parse_all(value.value) {
-                    self.extended_key_usage = eku.children().ok().map(|c| c.into_iter().filter_map(|t| t.oid().ok()).collect::<Vec<_>>());
-                }
+                let purposes = Tlv::parse_all(value.value)
+                    .ok()
+                    .filter(|eku| eku.tag == tag::SEQUENCE)
+                    .and_then(|eku| eku.children().ok())
+                    .and_then(|c| c.iter().map(|t| t.oid().ok()).collect::<Option<Vec<_>>>());
+                self.extended_key_usage = Some(purposes.unwrap_or_default());
             }
             // Authority Information Access: OCSP and CA-issuer locations.
             "1.3.6.1.5.5.7.1.1" => {
@@ -378,6 +382,15 @@ impl Certificate {
         } else {
             None
         }
+    }
+
+    /// [`signing_problem`](Self::signing_problem) as a clause that follows the certificate's
+    /// name ("it is not issued for signing documents (…)"), for lists of digital IDs.
+    pub fn signing_problem_clause(&self) -> Option<String> {
+        self.signing_problem().map(|d| match d.message.strip_prefix("The signer's certificate ") {
+            Some(rest) => format!("it {}", rest.strip_suffix('.').unwrap_or(rest)),
+            None => d.message,
+        })
     }
 
     /// Issued by itself (subject = issuer and its own key verifies it).
