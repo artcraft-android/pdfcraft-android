@@ -34,7 +34,9 @@ delete_field(&mut doc, "email")?;
 - Text and choice fields get new appearance streams (`/Tx BMC … EMC`): auto-size (`0 Tf`), comb,
   multiline wrapping, password masking, quadding, `/MK` background and border, list-box selection.
   The `/DA` font is used when `/DR` has it as a simple font or a composite font with a predefined
-  Unicode CMap; otherwise Helvetica (WinAnsi). A value or button caption the font can't hold
+  Unicode CMap; otherwise Helvetica (WinAnsi), or, for a value WinAnsi can't hold but the bundled
+  Inter can (Turkish, Polish, Greek, Cyrillic, …), Inter's outlines with no font at all. A value or
+  button caption the font can't hold
   (Chinese in a Helvetica field, a character beyond U+FFFF in a UCS-2 CMap) is kept, as Acrobat
   keeps it: `/V` is stored as typed, the appearance draws `?` for those characters, the widget is
   marked with the first one (`pdfcraft_fonts::UNDRAWN_MARK`, cleared once all of it can be drawn)

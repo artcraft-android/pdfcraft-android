@@ -10,8 +10,11 @@ Comments (annotations), ISO 32000-2 §12.5. Layer L3, depends on `pdfcraft-cos`,
 - **Appearance streams** (`appearance::build`) generated from the annotation dictionary, so new
   and restyled comments look the same in every viewer. Highlights multiply (`/BM /Multiply`).
   Note icons are PdfCraft's own drawings. Text boxes use standard Helvetica (WinAnsi), with
-  line breaking by approximate Helvetica proportions (no font program is bundled). Text it can't
-  draw (in a text box, callout, Fill & Sign text, measurement label or dynamic stamp's by-line;
+  line breaking by approximate Helvetica proportions (no font program is bundled); a text box,
+  callout or Fill & Sign text with letters WinAnsi can't hold but the bundled Inter can (Turkish,
+  Polish, Greek, Cyrillic, …) is drawn as Inter's outlines and measured by Inter
+  (`appearance::text_measure`). Text neither can draw (in a text box, callout, Fill & Sign text,
+  measurement label or dynamic stamp's by-line;
   `appearance::undrawable_text`) is kept as typed and drawn as `?`, and the comment is marked with
   the first such character (`pdfcraft_fonts::UNDRAWN_MARK`) so the engine reports the edit and
   flattening refuses to make it permanent. Two refusals (`AnnotError::Undrawable`): a redaction

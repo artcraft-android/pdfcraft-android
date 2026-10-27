@@ -460,6 +460,43 @@ fn text_a_field_font_cannot_hold_is_kept_marked_and_redrawn_elsewhere() {
     assert!(need_appearances(&doc));
 }
 
+/// A field value beyond Western European (Turkish ş, Polish ł, Greek, Cyrillic) is drawn as the
+/// bundled Inter's outlines instead of `?`, in the field's text colour, and nothing is marked.
+#[test]
+fn field_text_beyond_western_european_is_drawn_in_inter() {
+    let objs: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 800] >>".into(),
+        "<< /Type /Page /Parent 2 0 R /Annots [6 0 R 7 0 R] >>".into(),
+        "<< /Fields [6 0 R 7 0 R] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /DA (/Helv 10 Tf 0 0 1 rg) /V (Ada) /Rect [50 700 200 715] /P 3 0 R >>".into(),
+        "<< /Type /Annot /Subtype /Widget /FT /Tx /T (notes) /Ff 4096 /DA (/Helv 0 Tf 0 g) /Rect [50 500 200 560] /P 3 0 R >>".into(),
+    ];
+    let mut doc = document(&objs);
+    let shown = |doc: &Document, name: &str| {
+        let all = fields(doc);
+        let w = &field(&all, name).widgets[0];
+        let n = doc.get(w.obj).as_dict().unwrap().get(b"AP").unwrap().as_dict().unwrap().reference(b"N").unwrap();
+        let Object::Stream(s) = &*doc.get(n) else { panic!() };
+        let mark = doc.get(w.obj).as_dict().and_then(pdfcraft_fonts::undrawn_mark);
+        (String::from_utf8_lossy(&s.decoded().unwrap()).into_owned(), mark)
+    };
+    set_value(&mut doc, "name", &FieldValue::Text("Mustafa Çokyaşar".into())).unwrap();
+    assert_eq!(field(&fields(&doc), "name").value, ["Mustafa Çokyaşar"]);
+    let (ap, mark) = shown(&doc, "name");
+    assert_eq!(mark, None);
+    assert!(!ap.contains('?') && !ap.contains("Tj") && !ap.contains("BT"), "{ap}");
+    assert!(ap.contains("0 0 1 rg") && ap.contains(" c\n") && ap.contains("f\n"), "filled outlines in the field's colour: {ap}");
+    // A multiline field wraps by Inter's widths; Greek and Cyrillic the same way.
+    set_value(&mut doc, "notes", &FieldValue::Text("Zażółć gęślą jaźń. Ελληνικά, Привет".into())).unwrap();
+    assert_eq!(shown(&doc, "notes").1, None);
+    // Western European text is Helvetica text again.
+    set_value(&mut doc, "name", &FieldValue::Text("Ada".into())).unwrap();
+    assert!(shown(&doc, "name").0.contains("(Ada) Tj"));
+    assert!(undrawn_fields(&doc).is_empty());
+}
+
 /// A document that declares PDF/A can't ask other viewers to redraw its fields (PDF/A forbids
 /// `/NeedAppearances`): the value is still kept and its widget marked, and the flag stays off.
 #[test]

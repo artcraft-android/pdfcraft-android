@@ -1196,12 +1196,20 @@ fn needs_type3(text: &str) -> bool {
 const JAPANESE_FONT_NAME: &str = "PCJapanese";
 /// The `/Name` of the Type 3 fonts generated for Hebrew text.
 const HEBREW_FONT_NAME: &str = "PCHebrew";
+/// The `/Name` of the Type 3 fonts generated from Inter, for Latin, Greek and Cyrillic text the
+/// standard fonts can't hold (Turkish ş, Polish ł, …).
+const INTER_FONT_NAME: &str = "PCInter";
 
-/// Whether `font` is one of those generated fonts (Japanese or Hebrew): a replacement longer than
-/// one of them is split across several, which read back as one line (see [`same_font`]).
+/// Whether `font` is one of those generated fonts (Japanese, Hebrew or Inter): a replacement longer
+/// than one of them is split across several, which read back as one line (see [`same_font`]).
 fn is_type3_fallback(font: &Dict) -> bool {
     font.name(b"Subtype") == Some(b"Type3")
-        && font.name(b"Name").is_some_and(|n| n == JAPANESE_FONT_NAME.as_bytes() || n == HEBREW_FONT_NAME.as_bytes())
+        && font.name(b"Name").is_some_and(|n| [JAPANESE_FONT_NAME, HEBREW_FONT_NAME, INTER_FONT_NAME].iter().any(|name| n == name.as_bytes()))
+}
+
+/// Whether `face` is the bundled Inter rather than a craft-fonts face.
+fn is_inter(face: &CraftFont) -> bool {
+    std::ptr::eq(face, &pdfcraft_fonts::INTER)
 }
 
 /// Whether a run shown in `font` (a resource name, and the Japanese or Hebrew fallback face it subsets, if
@@ -1259,7 +1267,8 @@ fn type3_path(face: &CraftFont, ch: char) -> Result<(Vec<u8>, f64), EditError> {
         GlyphError::Missing => EditError::Invalid(format!("the {} fallback font has no glyph for U+{:04X}", face.family, ch as u32)),
         GlyphError::TooComplex => EditError::Invalid(format!("the {} fallback glyph U+{:04X} is too complex", face.family, ch as u32)),
     })?;
-    let (dx, width) = proportional(ch, &glyph);
+    // Inter's Greek and Cyrillic are proportional already.
+    let (dx, width) = if is_inter(face) { (0.0, glyph.width) } else { proportional(ch, &glyph) };
     let scale = 1000.0;
     // d1 is `wx wy llx lly urx ury` (ISO 32000-2 §9.6.4) with a box enclosing the glyph;
     // Acrobat draws a bullet in place of a glyph whose d1 is malformed.
@@ -1332,10 +1341,14 @@ fn no_hebrew_font() -> EditError {
 
 /// The faces a Type 3 replacement may draw `text` with, best first. Text with Hebrew takes the
 /// Hebrew face first (its Latin and digits too, so a line keeps one look), then the Japanese
-/// faces for anything it lacks; other text takes the Japanese faces, as before.
+/// faces for anything it lacks. Text Inter can draw all of (Turkish ş, Polish ł, Greek, Cyrillic, …)
+/// takes Inter, which every build has; other text takes the Japanese faces, as before.
 fn type3_faces(text: &str, family: crate::added::Family, bold: bool) -> Result<(Vec<&'static CraftFont>, bool), EditError> {
     let japanese = pdfcraft_fonts::document_japanese_fonts_for_style(family == crate::added::Family::Times, bold);
     if !text.chars().any(crate::bidi::is_hebrew) {
+        if text.chars().all(|c| is_win_ansi_char(c) || pdfcraft_fonts::inter_has(c)) {
+            return Ok((std::iter::once(&pdfcraft_fonts::INTER).chain(japanese).collect(), false));
+        }
         return Ok((japanese, false));
     }
     // Points are drawn on their letter with the font's positioning, which a one-glyph-per-
@@ -1431,10 +1444,17 @@ fn add_type3_font(doc: &mut Document, fonts_res: &mut Dict, face: &CraftFont, he
     let mut encoding = Dict::new();
     encoding.set(b"Type".to_vec(), Object::name("Encoding"));
     encoding.set(b"Differences".to_vec(), Object::Array(differences));
+    let (font_name, prefix) = if hebrew {
+        (HEBREW_FONT_NAME, "PCHe")
+    } else if is_inter(face) {
+        (INTER_FONT_NAME, "PCIn")
+    } else {
+        (JAPANESE_FONT_NAME, "PCJp")
+    };
     let mut font = Dict::new();
     font.set(b"Type".to_vec(), Object::name("Font"));
     font.set(b"Subtype".to_vec(), Object::name("Type3"));
-    font.set(b"Name".to_vec(), Object::name(if hebrew { HEBREW_FONT_NAME } else { JAPANESE_FONT_NAME }));
+    font.set(b"Name".to_vec(), Object::name(font_name));
     let mut descriptor = Dict::new();
     descriptor.set(b"Type".to_vec(), Object::name("FontDescriptor"));
     descriptor.set(b"FontName".to_vec(), Object::name(&format!("{}-{}", face.family, face.style).replace(' ', "")));
@@ -1454,7 +1474,6 @@ fn add_type3_font(doc: &mut Document, fonts_res: &mut Dict, face: &CraftFont, he
     font.set(b"Encoding".to_vec(), Object::Dict(encoding));
     font.set(b"CharProcs".to_vec(), Object::Dict(charprocs));
     font.set(b"ToUnicode".to_vec(), Object::Ref(cmap_ref));
-    let prefix = if hebrew { "PCHe" } else { "PCJp" };
     let mut name = String::from(prefix);
     let mut suffix = 0usize;
     while fonts_res.contains(name.as_bytes()) {

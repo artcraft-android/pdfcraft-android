@@ -1,4 +1,5 @@
-//! Arabic and Thai text shaping with the matching craft-fonts face and bounded glyph outlines.
+//! Arabic and Thai text shaping with the matching craft-fonts face, Latin, Greek and Cyrillic
+//! beyond WinAnsiEncoding with the bundled Inter, and bounded glyph outlines.
 
 use std::sync::OnceLock;
 
@@ -27,6 +28,8 @@ pub struct ShapedCluster {
 pub enum ShapedScript {
     Arabic,
     Thai,
+    /// Latin, Greek and Cyrillic in Inter ([`crate::INTER`]), for text the standard fonts can't draw.
+    Inter,
 }
 
 impl ShapedScript {
@@ -34,6 +37,7 @@ impl ShapedScript {
         match self {
             Self::Arabic => crate::document_arabic_font(),
             Self::Thai => crate::document_thai_font(),
+            Self::Inter => Some(&crate::INTER),
         }
     }
 }
@@ -41,9 +45,11 @@ impl ShapedScript {
 fn face(script: ShapedScript) -> Option<&'static (FontRef<'static>, ShaperData)> {
     static FACE: OnceLock<Option<(FontRef<'static>, ShaperData)>> = OnceLock::new();
     static THAI: OnceLock<Option<(FontRef<'static>, ShaperData)>> = OnceLock::new();
+    static INTER: OnceLock<Option<(FontRef<'static>, ShaperData)>> = OnceLock::new();
     let cache = match script {
         ShapedScript::Arabic => &FACE,
         ShapedScript::Thai => &THAI,
+        ShapedScript::Inter => &INTER,
     };
     cache
         .get_or_init(|| {
@@ -76,6 +82,12 @@ pub fn shape_thai(text: &str) -> Result<Vec<ShapedCluster>, GlyphError> {
     shape_script(text, false, ShapedScript::Thai)
 }
 
+/// Shape one directional run of Latin, Greek or Cyrillic text with Inter, clusters in drawing
+/// order. [`GlyphError::Missing`] when Inter lacks a character.
+pub fn shape_inter(text: &str, rtl: bool) -> Result<Vec<ShapedCluster>, GlyphError> {
+    shape_script(text, rtl, ShapedScript::Inter)
+}
+
 fn shape_script(text: &str, rtl: bool, kind: ShapedScript) -> Result<Vec<ShapedCluster>, GlyphError> {
     let (font, data) = face(kind).ok_or(GlyphError::NoFont)?;
     let shaper = data.shaper(font).build();
@@ -83,13 +95,16 @@ fn shape_script(text: &str, rtl: bool, kind: ShapedScript) -> Result<Vec<ShapedC
     let mut buffer = UnicodeBuffer::new();
     buffer.push_str(text);
     buffer.set_direction(if rtl { Direction::RightToLeft } else { Direction::LeftToRight });
-    buffer.set_script(match kind {
-        ShapedScript::Arabic => script::ARABIC,
-        ShapedScript::Thai => script::THAI,
-    });
-    // Preserve the historical Arabic per-character mapping; Thai marks stay with their base.
+    match kind {
+        ShapedScript::Arabic => buffer.set_script(script::ARABIC),
+        ShapedScript::Thai => buffer.set_script(script::THAI),
+        // Latin, Greek or Cyrillic, from the text itself.
+        ShapedScript::Inter => buffer.guess_segment_properties(),
+    }
+    // Preserve the historical Arabic per-character mapping (Inter's text gets the same); Thai
+    // marks stay with their base.
     buffer.set_cluster_level(match kind {
-        ShapedScript::Arabic => BufferClusterLevel::Characters,
+        ShapedScript::Arabic | ShapedScript::Inter => BufferClusterLevel::Characters,
         ShapedScript::Thai => BufferClusterLevel::MonotoneGraphemes,
     });
     let shaped = shaper.shape(buffer, ShapeOptions::new());

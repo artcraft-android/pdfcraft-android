@@ -8,11 +8,19 @@
 //!
 //! The note icons are PdfCraft's own drawings (AGENTS.md §1). Text boxes use the standard
 //! Helvetica font with WinAnsi encoding; line breaking uses [`text_width`], an approximation of
-//! Helvetica's proportions by character class (no font program or metrics file is bundled).
+//! Helvetica's proportions by character class (no font program or metrics file is bundled). A text
+//! box whose text that encoding can't hold (Turkish ş, Polish ł, Greek, Cyrillic, …) is drawn as
+//! the outlines of the bundled Inter instead ([`pdfcraft_fonts::needs_inter`], [`text_measure`]).
 
 use pdfcraft_cos::{Dict, Object, PdfString, Stream};
-use pdfcraft_fonts::{first_undrawable, literal, win_ansi};
+use pdfcraft_fonts::{first_undrawable, first_undrawable_inter, helvetica_width, inter_path, inter_width, literal, needs_inter, win_ansi, wrap_with};
 pub use pdfcraft_fonts::{helvetica_width as text_width, wrap};
+
+/// How [`build`] measures the lines of a text box holding `text`: in Inter when it draws the box in
+/// Inter (text the standard fonts can't hold), else as Helvetica ([`text_width`]).
+pub fn text_measure(text: &str) -> fn(&str, f64) -> f64 {
+    if needs_inter(text) { inter_width } else { helvetica_width }
+}
 
 use crate::{NOTE_SIZE, Rgb, n};
 
@@ -266,13 +274,13 @@ pub(crate) fn picture_turn(d: &Dict) -> i64 {
 
 /// The first text [`build`] would draw in the standard fonts (Helvetica, WinAnsiEncoding) that
 /// they can't, which would come out as `?`: what it is (for the message) and the character. The
-/// text of a text box, callout or Fill & Sign text, a measurement's label, a dynamic stamp's
-/// "By …" line, and a redaction mark's overlay text (drawn when it is applied). `None` when all of
-/// it can be drawn.
+/// text of a text box, callout or Fill & Sign text (drawn in Inter when Inter has every such
+/// character), a measurement's label, a dynamic stamp's "By …" line, and a redaction mark's overlay
+/// text (drawn when it is applied). `None` when all of it can be drawn.
 pub fn undrawable_text(d: &Dict) -> Option<(&'static str, char)> {
     let text = |key: &[u8]| d.get(key).and_then(Object::as_string).map(PdfString::to_text);
     let (what, text) = match d.name(b"Subtype")? {
-        b"FreeText" => ("the comment's text", text(b"Contents")?),
+        b"FreeText" => return text(b"Contents").and_then(|t| first_undrawable_inter(&t)).map(|c| ("the comment's text", c)),
         b"Line" | b"PolyLine" | b"Polygon" => ("the measurement label", text(b"PCMeasureValue")?),
         b"Stamp" if matches!(d.get(b"PCStamp"), Some(Object::Bool(true))) => ("the stamp's \"By\" line", text(b"PCByLine")?),
         // Drawn in Helvetica when the redaction is applied: refused when it is marked.
@@ -697,31 +705,44 @@ pub fn build(d: &Dict) -> Option<Stream> {
             let pad = 2.0 + bw;
             let width = (rect[2] - rect[0] - 2.0 * pad).max(1.0);
             let q = d.int(b"Q").unwrap_or(0);
-            c.push_str(&format!(
-                "{} {} {} {} re W n\nBT\n/Helv {} Tf\n{}",
-                n(rect[0]),
-                n(rect[1]),
-                n(rect[2] - rect[0]),
-                n(rect[3] - rect[1]),
-                n(size),
-                rg(text_color)
-            ));
+            // Text the standard fonts can't hold is drawn as Inter's outlines, in the text colour.
+            let inter = needs_inter(&text);
+            let measure = text_measure(&text);
+            c.push_str(&format!("{} {} {} {} re W n\n", n(rect[0]), n(rect[1]), n(rect[2] - rect[0]), n(rect[3] - rect[1])));
+            if inter {
+                c.push_str(&rg(text_color));
+            } else {
+                c.push_str(&format!("BT\n/Helv {} Tf\n{}", n(size), rg(text_color)));
+            }
             let mut out = c.into_bytes();
             let mut y = rect[3] - pad - size * 0.9;
-            for line in wrap(&text, size, width) {
+            for line in wrap_with(&text, size, width, measure) {
                 if y < rect[1] - size {
                     break;
                 }
-                let lw = text_width(&line, size);
+                let lw = measure(&line, size);
                 let x = match q {
                     1 => rect[0] + pad + (width - lw) / 2.0,
                     2 => rect[2] - pad - lw,
                     _ => rect[0] + pad,
                 };
-                out.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
-                out.extend(literal(&win_ansi(&line)));
-                out.extend_from_slice(b" Tj\n");
+                if inter {
+                    // A line of spaces has no outline, and `f` needs a path.
+                    let path = inter_path(&line, size, x, y);
+                    if !path.is_empty() {
+                        out.extend(path.bytes());
+                        out.extend_from_slice(b"f\n");
+                    }
+                } else {
+                    out.extend(format!("1 0 0 1 {} {} Tm ", n(x), n(y)).bytes());
+                    out.extend(literal(&win_ansi(&line)));
+                    out.extend_from_slice(b" Tj\n");
+                }
                 y -= size * 1.2;
+            }
+            if inter {
+                // No font: the text is paths.
+                return Some(form(full, &out, res));
             }
             out.extend_from_slice(b"ET\n");
             let mut font = Dict::new();

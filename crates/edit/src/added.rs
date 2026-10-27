@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 use pdfcraft_fonts::{
-    GlyphError, GlyphOutline, ShapedCluster, ShapedScript, helvetica_width, literal, shape_arabic, shape_thai, shaped_glyph, win_ansi,
+    GlyphError, GlyphOutline, ShapedCluster, ShapedScript, helvetica_width, literal, shape_arabic, shape_inter, shape_thai, shaped_glyph, win_ansi,
 };
 use unicode_bidi::{Level, ParagraphBidiInfo};
 
@@ -224,6 +224,7 @@ pub fn lines(t: &AddedText) -> Vec<String> {
 /// does).
 fn wrapped(t: &AddedText) -> Vec<(String, bool)> {
     let width = (t.rect[2] - t.rect[0]).max(t.size);
+    let inter = uses_inter(t);
     let mut out = Vec::new();
     for para in t.text.split('\n') {
         let arabic = para.chars().any(is_arabic);
@@ -236,17 +237,18 @@ fn wrapped(t: &AddedText) -> Vec<(String, bool)> {
             continue;
         }
         let rtl = arabic && unicode_bidi::get_base_direction(para) == unicode_bidi::Direction::Rtl;
+        // Inter text is measured as shaped, like Arabic and Thai.
+        let shaped = arabic || thai || inter;
         // Arabic words are shaped one by one (joining stops at spaces), so a line's width is the
         // sum of its words' and shaping stays linear in the paragraph's length. The space is the
         // paragraph's; a space between Latin words is drawn in the item's font, a few hundredths
         // of an em apart.
-        let measure = |s: &str| if arabic || thai { shaped_width(t, s, rtl) } else { t.family.width(s, t.size, t.bold) };
+        let measure = |s: &str| if shaped { shaped_width(t, s, rtl) } else { t.family.width(s, t.size, t.bold) };
         let space = measure(" ");
         let (mut line, mut line_w) = (String::new(), 0.0);
         for word in para.split(' ') {
             let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-            let candidate_w =
-                if arabic || thai { if line.is_empty() { measure(word) } else { line_w + space + measure(word) } } else { measure(&candidate) };
+            let candidate_w = if shaped { if line.is_empty() { measure(word) } else { line_w + space + measure(word) } } else { measure(&candidate) };
             if !line.is_empty() && candidate_w > width {
                 out.push((std::mem::take(&mut line), rtl));
                 line = word.to_string();
@@ -294,15 +296,38 @@ fn is_thai(c: char) -> bool {
     matches!(u32::from(c), 0x0E00..=0x0E7F)
 }
 
+/// Whether the item's text other than Arabic and Thai is drawn in Inter: some of it is beyond
+/// WinAnsiEncoding (Turkish ş, Polish ł, Greek, Cyrillic, …) and Inter has all of that. All of it,
+/// not just those letters, so a word never mixes two fonts.
+fn uses_inter(t: &AddedText) -> bool {
+    let mut any = false;
+    for c in t.text.chars().filter(|c| !matches!(c, '\n' | '\r') && !is_arabic(*c) && !is_thai(*c) && !is_bidi_control(*c)) {
+        if pdfcraft_fonts::win_ansi_encodable(c) {
+            continue;
+        }
+        if !pdfcraft_fonts::inter_has(c) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+/// The first character of `s` neither the standard fonts nor Inter can draw.
+fn first_undrawable_inter(s: &str) -> Option<char> {
+    s.chars().find(|c| !pdfcraft_fonts::win_ansi_encodable(*c) && !pdfcraft_fonts::inter_has(*c))
+}
+
 /// Arabic letters, marks, digits and punctuation: an item with any of them is shaped with the
 /// craft-fonts Arabic face.
 fn is_arabic(c: char) -> bool {
     matches!(u32::from(c), 0x0600..=0x06FF | 0x0750..=0x077F | 0x0870..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFC)
 }
 
-/// The first character of `t` that would be drawn as `?`: outside WinAnsiEncoding and not drawn
-/// with the craft-fonts Arabic face (#125), or Arabic that the face can't draw (or that has no
-/// face to draw it). Page-content tools refuse such text; the Add-text editor keeps it open.
+/// The first character of `t` that would be drawn as `?`: outside WinAnsiEncoding, not in Inter
+/// ([`uses_inter`]) and not drawn with the craft-fonts Arabic face (#125), or Arabic that the face
+/// can't draw (or that has no face to draw it). Page-content tools refuse such text; the Add-text
+/// editor keeps it open.
 pub fn first_undrawable(t: &AddedText) -> Option<char> {
     if t.text.chars().any(is_thai) {
         if let Some(c) = t.text.chars().find(|c| is_thai(*c) && !pdfcraft_fonts::thai_has(*c)) {
@@ -316,9 +341,9 @@ pub fn first_undrawable(t: &AddedText) -> Option<char> {
         return Some(c);
     }
     if pdfcraft_fonts::document_arabic_font().is_none() || !t.text.chars().any(is_arabic) {
-        // Drawn line by line in the item's standard font (`\n` splits lines). Without the face
-        // that is also how `draw` redraws an existing item, so it's checked that way.
-        return t.text.split('\n').find_map(pdfcraft_fonts::first_non_win_ansi);
+        // Drawn line by line in the item's standard font (`\n` splits lines), or all in Inter.
+        // Without the face that is also how `draw` redraws an existing item, so it's checked that way.
+        return t.text.split('\n').find_map(first_undrawable_inter);
     }
     // What `shaped_layout` leaves to the standard font, exactly as `draw_shaped` splits it.
     wrapped(t).into_iter().find_map(|(line, rtl)| {
@@ -373,19 +398,23 @@ fn shaped_layout(t: &AddedText, line: &str, rtl: bool) -> Result<(Vec<Piece>, f6
     let base = if rtl { Level::rtl() } else { Level::ltr() };
     let info = ParagraphBidiInfo::new(line, Some(base));
     let (levels, runs) = info.visual_runs(0..line.len());
+    let inter = uses_inter(t);
     let mut pieces = Vec::new();
     for run in runs {
         let run_rtl = levels.get(run.start).is_some_and(Level::is_rtl);
         // Runs lie on character boundaries; a missing slice is skipped, never a panic.
         let Some(text) = line.get(run) else { continue };
         // Arabic letters take the Arabic face; so do spaces and punctuation between them, which the
-        // shaper then mirrors. Latin text (and what the face lacks) keeps the item's font.
+        // shaper then mirrors. Latin text (and what the face lacks) keeps the item's font, or takes
+        // Inter when the item has letters beyond WinAnsiEncoding ([`uses_inter`]).
         let mut segments: Vec<(Option<ShapedScript>, String)> = Vec::new();
         for c in text.chars().filter(|c| !is_bidi_control(*c)) {
             let script = if is_thai(c) {
                 Some(ShapedScript::Thai)
             } else if is_arabic(c) || (run_rtl && !c.is_alphanumeric() && pdfcraft_fonts::arabic_has(c)) {
                 Some(ShapedScript::Arabic)
+            } else if inter {
+                Some(ShapedScript::Inter)
             } else {
                 None
             };
@@ -402,6 +431,7 @@ fn shaped_layout(t: &AddedText, line: &str, rtl: bool) -> Result<(Vec<Piece>, f6
                 let shaped = match script {
                     ShapedScript::Arabic => shape_arabic(&s, run_rtl).map_err(|e| arabic_error(e, &s))?,
                     ShapedScript::Thai => shape_thai(&s).map_err(|e| thai_error(e, &s))?,
+                    ShapedScript::Inter => shape_inter(&s, run_rtl).map_err(|e| inter_error(e, &s))?,
                 };
                 Piece::Shaped(shaped)
             } else if run_rtl {
@@ -434,6 +464,13 @@ fn arabic_error(e: GlyphError, text: &str) -> EditError {
             .into(),
         GlyphError::Missing => format!("the Arabic font can't show \"{text}\""),
         GlyphError::TooComplex => format!("the Arabic font's glyphs for \"{text}\" are too complex"),
+    })
+}
+
+fn inter_error(e: GlyphError, text: &str) -> EditError {
+    EditError::Invalid(match e {
+        GlyphError::NoFont | GlyphError::Missing => format!("the Inter font can't show \"{text}\""),
+        GlyphError::TooComplex => format!("the Inter glyphs for \"{text}\" are too complex"),
     })
 }
 
@@ -512,6 +549,7 @@ fn draw_laid_shaped(
                 entry.insert(outline(c.script, *id).map_err(|e| match c.script {
                     ShapedScript::Arabic => arabic_error(e, &c.text),
                     ShapedScript::Thai => thai_error(e, &c.text),
+                    ShapedScript::Inter => inter_error(e, &c.text),
                 })?);
             }
         }
@@ -646,6 +684,7 @@ fn type3_shaped(doc: &mut Document, clusters: &[&ShapedCluster], outlines: &Hash
             match script {
                 ShapedScript::Arabic => "Arabic",
                 ShapedScript::Thai => "Thai",
+                ShapedScript::Inter => "Inter",
             },
             |f| f.family,
         ),
@@ -697,7 +736,10 @@ fn draw(doc: &mut Document, c: &Content, view: [f64; 6], taken: &Dict, existing:
             }
             let mut fonts = Dict::new();
             fonts.set(name.clone().into_bytes(), Object::Dict(font));
-            if t.text.chars().any(is_thai) || (t.text.chars().any(is_arabic) && (pdfcraft_fonts::document_arabic_font().is_some() || !existing)) {
+            let arabic = t.text.chars().any(is_arabic);
+            let arabic_face = pdfcraft_fonts::document_arabic_font().is_some();
+            // Inter text is shaped too, unless Arabic in it is kept as `?` (an existing item, no face).
+            if t.text.chars().any(is_thai) || (arabic && (arabic_face || !existing)) || (uses_inter(t) && (arabic_face || !arabic)) {
                 draw_shaped(doc, t, taken, &mut fonts, &mut out)?;
                 res.set(b"Font".to_vec(), Object::Dict(fonts));
                 out.extend_from_slice(b"Q\n");
@@ -934,8 +976,12 @@ fn validate(c: &Content) -> Result<(), EditError> {
             // Everything else in it is drawn in the standard font, so it still has to fit.
             let undrawable = if t.text.chars().any(shaped_arabic) && pdfcraft_fonts::document_arabic_font().is_none() {
                 t.text.split('\n').find_map(|line| {
-                    line.chars()
-                        .find(|c| !shaped_arabic(*c) && !(is_thai(*c) && pdfcraft_fonts::thai_has(*c)) && !pdfcraft_fonts::win_ansi_encodable(*c))
+                    line.chars().find(|c| {
+                        !shaped_arabic(*c)
+                            && !(is_thai(*c) && pdfcraft_fonts::thai_has(*c))
+                            && !pdfcraft_fonts::win_ansi_encodable(*c)
+                            && !pdfcraft_fonts::inter_has(*c)
+                    })
                 })
             } else {
                 first_undrawable(t)

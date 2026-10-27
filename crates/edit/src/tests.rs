@@ -761,7 +761,9 @@ fn fallback_paths(doc: &Document) -> Vec<Vec<u8>> {
     let p = pdfcraft_model::pages(doc).swap_remove(0);
     let res = doc.resolve(p.dict.get(b"Resources").unwrap());
     let fonts = doc.resolve(res.as_dict().unwrap().get(b"Font").unwrap());
-    let font = doc.resolve(fonts.as_dict().unwrap().get(b"PCJp").unwrap());
+    // The Japanese fallback, or Inter's for Latin, Greek and Cyrillic.
+    let fonts = fonts.as_dict().unwrap();
+    let font = doc.resolve(fonts.get(b"PCJp").or_else(|| fonts.get(b"PCIn")).unwrap());
     let procs = doc.resolve(font.as_dict().unwrap().get(b"CharProcs").unwrap());
     procs
         .as_dict()
@@ -858,17 +860,11 @@ fn japanese_fallback_reports_the_face_after_save_and_reopen() {
     }
 }
 
+/// Cyrillic replacement text in a serif line comes from Inter, which every build has (the serif
+/// Japanese fallback has no Cyrillic).
 #[test]
 fn cyrillic_in_a_serif_line_falls_back_to_a_face_that_has_it() {
-    if without_craft_fonts("cyrillic_in_a_serif_line_falls_back_to_a_face_that_has_it") {
-        return;
-    }
     let replacement = "Привет, world";
-    let has_all = |f: &pdfcraft_fonts::CraftFont| replacement.chars().all(|ch| pdfcraft_fonts::japanese_glyph_from(f, ch).is_ok());
-    if !pdfcraft_fonts::CRAFT_FONTS.iter().any(|f| f.covers("Jpan") && has_all(f)) {
-        eprintln!("skipping: no Japanese fallback face has Cyrillic");
-        return;
-    }
     for paragraph in [false, true] {
         let mut doc = styled_text_page("Times-Roman");
         if paragraph {
@@ -1074,7 +1070,7 @@ fn type3_fallback_glyphs_declare_a_well_formed_d1() {
     if without_craft_fonts("type3_fallback_glyphs_declare_a_well_formed_d1") {
         return;
     }
-    // Cyrillic is respaced (shifted by its side bearing), and its box must move with it.
+    // Japanese from the craft-fonts face, Cyrillic from Inter: every box encloses its glyph.
     let mut glyphs = Vec::new();
     for replacement in ["見本商会 御中", "София 2027"] {
         let mut doc = text_page("BT /F2 12 Tf 72 700 Td (ab) Tj ET");
@@ -1099,12 +1095,10 @@ fn type3_fallback_glyphs_declare_a_well_formed_d1() {
 }
 
 /// Shippori Mincho, the serif fallback, has no Cyrillic: Bulgarian replacement text in a serif
-/// line takes a fallback face that has every letter instead of failing on the first one.
+/// line takes a fallback face that has every letter (Inter, in every build) instead of failing on
+/// the first one.
 #[test]
 fn cyrillic_replacement_in_a_serif_line_uses_a_face_with_the_letters() {
-    if without_craft_fonts("cyrillic_replacement_in_a_serif_line_uses_a_face_with_the_letters") {
-        return;
-    }
     let replacement = "София 2027";
     for paragraph in [false, true] {
         let mut doc = styled_text_page("ABCDEF+Garamond");
@@ -1122,12 +1116,54 @@ fn cyrillic_replacement_in_a_serif_line_uses_a_face_with_the_letters() {
     }
 }
 
+/// Replacement text with letters beyond Western European (Turkish ş, Polish ł, Romanian ț) in a
+/// line whose font can't show them is drawn from Inter, which every build has, instead of being
+/// refused (it used to need the craft-fonts Japanese faces), and reads back as typed. Text Inter
+/// lacks too still needs those faces: refused without them, never written as `?`.
+#[test]
+fn replacement_text_beyond_western_european_is_drawn_in_inter() {
+    for replacement in ["Mustafa çokyaşar", "Zażółć gęślą jaźń", "Țară și"] {
+        for paragraph in [false, true] {
+            let mut doc = text_page("BT /F1 12 Tf 72 700 Td (Mustafa cokyasar) Tj ET");
+            let edit = if paragraph { text::replace_block(&mut doc, 0, 0, replacement) } else { text::replace_line(&mut doc, 0, 0, replacement) };
+            assert_eq!(edit.unwrap().substituted.as_deref(), Some("Inter Type3"), "{replacement}");
+            assert_eq!(text::text_lines(&reopen(&doc), 0).unwrap()[0].text, replacement);
+            assert!(!fallback_paths(&reopen(&doc)).is_empty());
+        }
+    }
+    if pdfcraft_fonts::document_japanese_font().is_none() {
+        let mut doc = text_page("BT /F1 12 Tf 72 700 Td (ab) Tj ET");
+        assert!(text::replace_line(&mut doc, 0, 0, "ş 中").is_err());
+    }
+}
+
+/// Added text beyond Western European is drawn in Inter (shaped, every glyph of the item from it so
+/// a word never mixes fonts) instead of being refused, and reads back as typed. Text Inter can't
+/// draw either is refused as before.
+#[test]
+fn added_text_beyond_western_european_is_drawn_in_inter() {
+    let mut doc = fixture();
+    let text =
+        AddedText { rect: [72.0, 600.0, 400.0, 700.0], text: "Mustafa çokyaşar\nΕλληνικά Привет".into(), ..AddedText::default() };
+    add_content(&mut doc, 0, &Content::Text(text.clone())).unwrap();
+    let reopened = reopen(&doc);
+    let lines: Vec<String> = text::text_lines(&reopened, 0).unwrap().into_iter().map(|l| l.text).collect();
+    assert!(lines.iter().any(|l| l == "Mustafa çokyaşar"), "{lines:?}");
+    assert!(lines.iter().any(|l| l == "Ελληνικά Привет"), "{lines:?}");
+    let Content::Text(back) = &list_added(&reopened)[0].content else { panic!("text") };
+    assert_eq!(back.text, text.text);
+    // Retyped to Western European text: the standard font again.
+    add_content(&mut doc, 0, &Content::Text(AddedText { text: "Café".into(), ..text.clone() })).unwrap();
+    let cjk = AddedText { text: "ş 中".into(), ..text };
+    assert!(add_content(&mut doc, 0, &Content::Text(cjk)).unwrap_err().to_string().contains("U+4E2D"));
+}
+
 /// The `/Widths` of the page's Type 3 fallback font, for its Cyrillic letters.
 fn fallback_widths(doc: &Document) -> Vec<f64> {
     let p = pdfcraft_model::pages(doc).swap_remove(0);
     let res = doc.resolve(p.dict.get(b"Resources").unwrap());
     let fonts = doc.resolve(res.as_dict().unwrap().get(b"Font").unwrap());
-    let font = doc.resolve(fonts.as_dict().unwrap().get(b"PCJp").unwrap());
+    let font = doc.resolve(fonts.as_dict().unwrap().get(b"PCIn").unwrap());
     let font = font.as_dict().unwrap();
     let widths = doc.resolve(font.get(b"Widths").unwrap()).as_array().unwrap().iter().filter_map(|w| w.as_f64()).collect::<Vec<_>>();
     // "София 2027": the first five codes are the letters.

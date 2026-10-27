@@ -1,5 +1,7 @@
 //! Typed signatures and bounded glyph outlines from approved fonts (bundled, or craft-fonts).
 
+use std::sync::OnceLock;
+
 use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
@@ -9,6 +11,120 @@ static FONT: &[u8] = include_bytes!("../../../assets/fonts/DancingScript.ttf");
 /// Inter Regular, the interface font. Typed signatures fall back to it, slanted, for characters
 /// the script font lacks (Dancing Script is Latin and Vietnamese only: no Cyrillic or Greek).
 pub static INTER_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+
+/// Inter as a face the generated Type 3 fonts draw from ([`japanese_glyph_from`]): the stand-in
+/// for Latin, Greek and Cyrillic text the standard fonts' WinAnsiEncoding can't hold (Turkish ş,
+/// Polish ł, Czech ř, …). Unlike the craft-fonts faces, every build has it.
+pub static INTER: crate::CraftFont = crate::CraftFont { family: "Inter", style: "Regular", scripts: &["Latn", "Grek", "Cyrl"], bytes: INTER_REGULAR };
+
+fn inter() -> Option<&'static FontRef<'static>> {
+    static FACE: OnceLock<Option<FontRef<'static>>> = OnceLock::new();
+    FACE.get_or_init(|| FontRef::new(INTER_REGULAR).ok()).as_ref()
+}
+
+/// Whether Inter has a glyph for `c`.
+pub fn inter_has(c: char) -> bool {
+    inter().is_some_and(|f| f.charmap().map(c).is_some())
+}
+
+/// The advance of `s` in Inter at `size` points (no kerning). A tab counts as a space; a character
+/// Inter lacks counts as Helvetica's estimate for it.
+pub fn inter_width(s: &str, size: f64) -> f64 {
+    let Some(font) = inter() else { return crate::helvetica_width(s, size) };
+    let loc = LocationRef::default();
+    let em = f64::from(font.metrics(Size::unscaled(), loc).units_per_em.max(1));
+    let (charmap, advances) = (font.charmap(), font.glyph_metrics(Size::unscaled(), loc));
+    let mut buf = [0u8; 4];
+    s.chars()
+        .map(|c| if c == '\t' { ' ' } else { c })
+        .map(|c| match charmap.map(c).and_then(|g| advances.advance_width(g)) {
+            Some(w) => f64::from(w) * size / em,
+            None => crate::helvetica_width(c.encode_utf8(&mut buf), size),
+        })
+        .sum()
+}
+
+/// PDF path operators (`m`, `l`, `c`, `h`) that draw one line of `s` in Inter at `size` points with
+/// its baseline starting at (`x`, `y`); fill them (`f`) to show the text. Generated appearances
+/// draw text the standard fonts can't hold this way, so they need no font resource. A tab is a
+/// space; characters Inter lacks are skipped, so check [`crate::needs_inter`] first.
+pub fn inter_path(s: &str, size: f64, x: f64, y: f64) -> String {
+    let Some(font) = inter() else { return String::new() };
+    let loc = LocationRef::default();
+    let scale = size / f64::from(font.metrics(Size::unscaled(), loc).units_per_em.max(1));
+    let (charmap, glyphs, advances) = (font.charmap(), font.outline_glyphs(), font.glyph_metrics(Size::unscaled(), loc));
+    let mut pen = PathPen { out: String::new(), scale, x, y, last: (0.0, 0.0) };
+    for c in s.chars().map(|c| if c == '\t' { ' ' } else { c }) {
+        let Some(gid) = charmap.map(c) else { continue };
+        if let Some(g) = glyphs.get(gid) {
+            let _ = g.draw(DrawSettings::unhinted(Size::unscaled(), loc), &mut pen);
+        }
+        pen.x += f64::from(advances.advance_width(gid).unwrap_or(0.0)) * scale;
+    }
+    pen.out
+}
+
+/// Writes outlines as PDF path operators, quadratic curves as their exact cubic equivalents.
+struct PathPen {
+    out: String,
+    scale: f64,
+    /// Where the current glyph's origin is, in the output's space.
+    x: f64,
+    y: f64,
+    /// The current point in font units, for converting quadratic curves.
+    last: (f32, f32),
+}
+
+impl PathPen {
+    fn point(&mut self, x: f32, y: f32) {
+        let fmt = |v: f64| {
+            let s = format!("{v:.2}");
+            let s = s.trim_end_matches('0').trim_end_matches('.');
+            if s == "-0" { "0".to_string() } else { s.to_string() }
+        };
+        let (px, py) = (self.x + f64::from(x) * self.scale, self.y + f64::from(y) * self.scale);
+        self.out.push_str(&fmt(px));
+        self.out.push(' ');
+        self.out.push_str(&fmt(py));
+        self.out.push(' ');
+    }
+}
+
+impl OutlinePen for PathPen {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.point(x, y);
+        self.out.push_str("m\n");
+        self.last = (x, y);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.point(x, y);
+        self.out.push_str("l\n");
+        self.last = (x, y);
+    }
+
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        // The cubic with control points two thirds of the way to the quadratic's.
+        let (x0, y0) = self.last;
+        self.point(x0 + (cx - x0) * 2.0 / 3.0, y0 + (cy - y0) * 2.0 / 3.0);
+        self.point(x + (cx - x) * 2.0 / 3.0, y + (cy - y) * 2.0 / 3.0);
+        self.point(x, y);
+        self.out.push_str("c\n");
+        self.last = (x, y);
+    }
+
+    fn curve_to(&mut self, c0x: f32, c0y: f32, c1x: f32, c1y: f32, x: f32, y: f32) {
+        self.point(c0x, c0y);
+        self.point(c1x, c1y);
+        self.point(x, y);
+        self.out.push_str("c\n");
+        self.last = (x, y);
+    }
+
+    fn close(&mut self) {
+        self.out.push_str("h\n");
+    }
+}
 
 /// Forward slant of fallback glyphs in a typed signature (about 12°), so they lean like the script.
 const FALLBACK_SLANT: f64 = 0.21;

@@ -1246,6 +1246,41 @@ fn comment_text_the_standard_fonts_cannot_draw_is_kept_and_marked() {
     assert_eq!(text(&list(&doc, 0)[t], b"Contents"), "签名");
 }
 
+/// Text box and Fill & Sign text beyond Western European (Turkish ş, Polish ł, Greek, Cyrillic) is
+/// drawn as the bundled Inter's outlines instead of `?`, so nothing is marked; the box is sized and
+/// wrapped by Inter's measure. Text Inter can't draw either is still drawn in Helvetica and marked.
+#[test]
+fn comment_text_beyond_western_european_is_drawn_in_inter() {
+    let mut doc = fixture();
+    let mark = |doc: &Document, i: usize| pdfcraft_fonts::undrawn_mark(&list(doc, 0)[i]);
+    let typed = Shape::Typewriter { rect: [100.0, 700.0, 300.0, 716.0], font_size: 11.0 };
+    let f = add_annotation(
+        &mut doc,
+        &NewAnnotation { page: 0, style: Style::default_for(&typed), shape: typed, contents: "Mustafa çokyaşar".into(), author: "Ada".into() },
+        &meta("x"),
+    )
+    .unwrap();
+    let ap = ap_content(&doc, &list(&doc, 0)[f]);
+    assert!(!ap.contains('?') && !ap.contains("Tj") && !ap.contains("/Helv"), "{ap}");
+    assert!(ap.contains(" c\n") && ap.contains("f\n"), "drawn as filled outlines: {ap}");
+    assert_eq!((text(&list(&doc, 0)[f], b"Contents").as_str(), mark(&doc, f)), ("Mustafa çokyaşar", None));
+    // A text box with Greek and Cyrillic, the same way; Western European text goes back to Helvetica.
+    let mut boxed = new(0, Shape::TextBox { rect: [100.0, 600.0, 300.0, 650.0], font_size: 12.0 });
+    boxed.contents = "Ελληνικά\nПривет".into();
+    let t = add_annotation(&mut doc, &boxed, &meta("t")).unwrap();
+    assert_eq!(mark(&doc, t), None);
+    assert!(!ap_content(&doc, &list(&doc, 0)[t]).contains("Tj"));
+    set_contents(&mut doc, 0, t, "Zürich", &meta("")).unwrap();
+    assert!(ap_content(&doc, &list(&doc, 0)[t]).contains("/Helv"));
+    // With a character Inter lacks too, Helvetica draws it all and the first `?` is marked.
+    set_contents(&mut doc, 0, t, "ş 中", &meta("")).unwrap();
+    assert_eq!(mark(&doc, t), Some('ş'));
+    // Measured as drawn: Inter's widths, not Helvetica's estimate.
+    let measure = appearance::text_measure("çokyaşar");
+    assert_eq!(measure("çokyaşar", 10.0), pdfcraft_fonts::inter_width("çokyaşar", 10.0));
+    assert_eq!(appearance::text_measure("Zürich")("Zürich", 10.0), appearance::text_width("Zürich", 10.0));
+}
+
 /// Content edits rebuild the display copy on every commit but leave annotations alone: the
 /// cached appearance is drawn once and reused after that, byte-identical.
 #[test]
