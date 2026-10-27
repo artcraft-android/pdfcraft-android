@@ -225,6 +225,10 @@
     <string name="home_keyboard_shortcuts">Atajos de teclado</string>
     <!-- N, P, Page Down, Page Up, Ctrl+P, Ctrl, + and − are keys on the keyboard -->
     <string name="home_keyboard_shortcuts_body">Con un teclado conectado: N o Av Pág para la página siguiente, P o Re Pág para la anterior, las flechas para desplazarte, Ctrl+P para imprimir y Ctrl y + o − para ampliar.</string>
+    <string name="home_section_extra">Funciones extra</string>
+    <string name="home_extra_body">Cambios opcionales en el aspecto y el funcionamiento de PdfCraft.</string>
+    <string name="home_status_bar_in_documents">Mostrar la barra de estado en los documentos</string>
+    <string name="home_status_bar_in_documents_body">La barra de estado se muestra con las barras de herramientas. Al tocar para ocultarlas, la página ocupa toda la pantalla, también alrededor de la cámara.</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">Acerca de</string>

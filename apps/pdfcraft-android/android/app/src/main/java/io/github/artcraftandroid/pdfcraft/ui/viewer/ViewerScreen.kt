@@ -88,17 +88,20 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
     val context = LocalContext.current
 
     // The system bars go with the viewer's bars.
-    DisposableEffect(ctl.barsVisible) {
+    val statusBar = vm.statusBarInDocuments
+    DisposableEffect(ctl.barsVisible, statusBar, c.dark) {
         val window = (context as? Activity)?.window
         if (window != null) {
             val insets = WindowCompat.getInsetsController(window, view)
             insets.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             // the status bar stays hidden in the viewer (a black band where the camera is), as the
-            // reference's; the navigation bar comes and goes with the viewer's bars
-            insets.hide(WindowInsetsCompat.Type.statusBars())
+            // reference's, unless Extra Features shows it with the bars; the navigation bar comes and
+            // goes with the viewer's bars
+            if (statusBar && ctl.barsVisible) insets.show(WindowInsetsCompat.Type.statusBars()) else insets.hide(WindowInsetsCompat.Type.statusBars())
             if (ctl.barsVisible) insets.show(WindowInsetsCompat.Type.navigationBars()) else insets.hide(WindowInsetsCompat.Type.navigationBars())
-            // light status icons on the black band, as the reference has in both themes
-            insets.isAppearanceLightStatusBars = false
+            // light status icons on the black band, as the reference has in both themes; shown, they
+            // sit on the top bar's colour
+            insets.isAppearanceLightStatusBars = statusBar && !c.dark
             insets.isAppearanceLightNavigationBars = !c.dark
         }
         onDispose {
@@ -114,10 +117,11 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
     var quickExtraPx by remember { mutableIntStateOf(0) }
     val bottomPx = with(density) { if (ctl.tool == ViewerTool.None) QuickBarHeight.toPx() + quickExtraPx else BottomBarHeight.toPx() }
     // keyed on the document too: one opened over another (Create, Combine) has a fresh page view
-    LaunchedEffect(doc, ctl.barsVisible, statusPx, navPx, ctl.searching, ctl.tool, vm.readingMode, bottomPx) {
+    LaunchedEffect(doc, ctl.barsVisible, statusPx, navPx, ctl.searching, ctl.tool, vm.readingMode, bottomPx, statusBar) {
         val bottomShown = ctl.barsVisible && !ctl.searching && !vm.readingMode
         doc.viewer.setPadding(
-            top = if (ctl.barsVisible) statusPx + topPx else statusPx,
+            // with the status bar in documents, the page goes up to the top edge once the bars hide
+            top = if (ctl.barsVisible) statusPx + topPx else if (statusBar) 0f else statusPx,
             bottom = if (bottomShown) bottomPx + navPx else navPx,
         )
     }
@@ -293,7 +297,10 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
 
         // The bars.
         Column(Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
-            Box(Modifier.fillMaxWidth().height(with(density) { statusPx.toDp() }).background(Color.Black))
+            Box(
+                Modifier.fillMaxWidth().height(with(density) { statusPx.toDp() })
+                    .background(if (!statusBar) Color.Black else if (ctl.barsVisible) c.surface else Color.Transparent),
+            )
             AnimatedVisibility(
                 ctl.barsVisible,
                 enter = slideInVertically(tween(PdfMotion.BARS_MS)) { -it } + fadeIn(tween(PdfMotion.BARS_MS)),

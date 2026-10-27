@@ -812,6 +812,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         appPrefs.edit().putString("theme", t.name).apply()
     }
 
+    /**
+     * Extra Features ▸ the status bar in documents: shown with the viewer's bars, and the page uses the
+     * whole screen when they hide (off: the reference's black band where the camera is).
+     */
+    var statusBarInDocuments by mutableStateOf(appPrefs.getBoolean("statusBarInDocuments", false))
+        private set
+
+    fun updateStatusBarInDocuments(on: Boolean) {
+        statusBarInDocuments = on
+        appPrefs.edit().putBoolean("statusBarInDocuments", on).apply()
+    }
+
     // ---- Reading the document ---------------------------------------------------------------
 
     suspend fun outline(doc: OpenDocument) = engine?.let { e -> runCatching { e.command { outline(doc.id) } }.getOrNull() }.orEmpty()

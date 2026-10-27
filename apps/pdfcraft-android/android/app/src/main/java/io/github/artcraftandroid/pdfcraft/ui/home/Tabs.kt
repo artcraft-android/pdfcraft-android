@@ -383,6 +383,14 @@ private fun Preferences(vm: AppViewModel) {
         stringResource(R.string.home_keyboard_shortcuts_body),
         color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp),
     )
+    SheetDivider()
+    // what PdfCraft does differently from the reference, each by choice
+    Section(stringResource(R.string.home_section_extra))
+    Text(stringResource(R.string.home_extra_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
+    SheetRow(null, stringResource(R.string.home_status_bar_in_documents), { vm.updateStatusBarInDocuments(!vm.statusBarInDocuments) }) {
+        PdfSwitch(vm.statusBarInDocuments, { vm.updateStatusBarInDocuments(it) })
+    }
+    Text(stringResource(R.string.home_status_bar_in_documents_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
     Spacer(Modifier.height(24.dp))
     if (authorDialog) {
         var name by remember { mutableStateOf(vm.toolPrefs.author) }

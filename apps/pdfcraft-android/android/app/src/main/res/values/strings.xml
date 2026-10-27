@@ -226,6 +226,10 @@
     <string name="home_keyboard_shortcuts">Keyboard shortcuts</string>
     <!-- N, P, Page Down, Page Up, Ctrl+P, Ctrl, + and − are keys on the keyboard -->
     <string name="home_keyboard_shortcuts_body">With a keyboard connected: N or Page Down for the next page, P or Page Up for the previous one, the arrow keys to scroll, Ctrl+P to print, Ctrl and + or − to zoom.</string>
+    <string name="home_section_extra">Extra Features</string>
+    <string name="home_extra_body">Optional changes to how PdfCraft looks and works.</string>
+    <string name="home_status_bar_in_documents">Show the status bar in documents</string>
+    <string name="home_status_bar_in_documents_body">The status bar shows with the toolbars. When you tap to hide them, the page uses the whole screen, around the camera too.</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">About</string>
