@@ -12,36 +12,15 @@ static FONT: &[u8] = include_bytes!("../../../assets/fonts/DancingScript.ttf");
 /// the script font lacks (Dancing Script is Latin and Vietnamese only: no Cyrillic or Greek).
 pub static INTER_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
 
-/// Inter as a face the generated Type 3 fonts draw from ([`japanese_glyph_from`]): the stand-in
-/// for Latin, Greek and Cyrillic text the standard fonts' WinAnsiEncoding can't hold (Turkish ş,
-/// Polish ł, Czech ř, …). Unlike the craft-fonts faces, every build has it.
-pub static INTER: crate::CraftFont = crate::CraftFont { family: "Inter", style: "Regular", scripts: &["Latn", "Grek", "Cyrl"], bytes: INTER_REGULAR };
-
 fn inter() -> Option<&'static FontRef<'static>> {
     static FACE: OnceLock<Option<FontRef<'static>>> = OnceLock::new();
     FACE.get_or_init(|| FontRef::new(INTER_REGULAR).ok()).as_ref()
 }
 
-/// Whether Inter has a glyph for `c`.
+/// Whether Inter has a glyph for `c`: the stand-in for Latin, Greek and Cyrillic text the standard
+/// fonts' WinAnsiEncoding can't hold (Turkish ş, Polish ł, Czech ř, …), which every build has.
 pub fn inter_has(c: char) -> bool {
     inter().is_some_and(|f| f.charmap().map(c).is_some())
-}
-
-/// The advance of `s` in Inter at `size` points (no kerning). A tab counts as a space; a character
-/// Inter lacks counts as Helvetica's estimate for it.
-pub fn inter_width(s: &str, size: f64) -> f64 {
-    let Some(font) = inter() else { return crate::helvetica_width(s, size) };
-    let loc = LocationRef::default();
-    let em = f64::from(font.metrics(Size::unscaled(), loc).units_per_em.max(1));
-    let (charmap, advances) = (font.charmap(), font.glyph_metrics(Size::unscaled(), loc));
-    let mut buf = [0u8; 4];
-    s.chars()
-        .map(|c| if c == '\t' { ' ' } else { c })
-        .map(|c| match charmap.map(c).and_then(|g| advances.advance_width(g)) {
-            Some(w) => f64::from(w) * size / em,
-            None => crate::helvetica_width(c.encode_utf8(&mut buf), size),
-        })
-        .sum()
 }
 
 /// PDF path operators (`m`, `l`, `c`, `h`) that draw one line of `s` in Inter at `size` points with

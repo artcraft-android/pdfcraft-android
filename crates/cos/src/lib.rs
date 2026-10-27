@@ -13,6 +13,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod budget;
 mod bytes;
 mod document;
 mod object;
@@ -21,10 +22,11 @@ mod parser;
 mod security;
 mod writer;
 
+pub use budget::{DecodeBudget, MAX_PAGE_DECODED, MAX_PAGE_FORMS};
 pub use bytes::Bytes;
-pub use document::{Document, Revision, SourceIdentity, XrefEntry};
+pub use document::{Document, ReadState, Revision, SourceIdentity, XrefEntry};
 pub use object::{Dict, MAX_DECODED, Name, ObjRef, Object, PdfString, Stream};
-pub use parser::{Lexer, parse_indirect};
+pub use parser::{Lexer, is_whitespace, parse_indirect};
 pub use pdfcraft_crypt::{
     Algorithm, Auth, Method as CryptMethod, NewEncryption, Permissions, SecurityHandler, effective_password, pdfdoc_byte, pdfdoc_char,
 };
@@ -54,6 +56,15 @@ pub enum CosError {
     ReadOnlyLimit,
 }
 
+impl CosError {
+    /// Whether stream data was refused only because it decodes to more than the reader's cap
+    /// (a resource guard, as for a decompression bomb), not because it is damaged. The filter
+    /// error's text is what [`CosError::Filter`] carries.
+    pub fn is_decode_limit(&self) -> bool {
+        matches!(self, CosError::Filter(m) if m.starts_with("decoded output exceeds the limit"))
+    }
+}
+
 #[cfg(test)]
 mod decode_limit_tests {
     use super::CosError;
@@ -63,14 +74,5 @@ mod decode_limit_tests {
         assert!(CosError::Filter(pdfcraft_filters::FilterError::LimitExceeded(8).to_string()).is_decode_limit());
         assert!(!CosError::Filter("invalid deflate data".into()).is_decode_limit());
         assert!(!CosError::MissingObject(3).is_decode_limit());
-    }
-}
-
-impl CosError {
-    /// Whether stream data was refused only because it decodes to more than the reader's cap
-    /// (a resource guard, as for a decompression bomb), not because it is damaged. The filter
-    /// error's text is what [`CosError::Filter`] carries.
-    pub fn is_decode_limit(&self) -> bool {
-        matches!(self, CosError::Filter(m) if m.starts_with("decoded output exceeds the limit"))
     }
 }

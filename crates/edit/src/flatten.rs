@@ -6,9 +6,10 @@
 //! the appearance's bounding box, transformed by its `/Matrix`, mapped onto `/Rect`). Hidden
 //! annotations are left alone; links are kept (they have no ink and stay clickable). Flattened
 //! comments take their pop-ups and replies with them; flattened widgets are removed from the
-//! form's field tree.
+//! form's field tree. An annotation whose appearance cannot be drawn is not flattened: it stays
+//! as it is, so no comment or field value is lost with nothing in its place.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use pdfcraft_cos::{Dict, Document, ObjRef, Object};
 
@@ -62,9 +63,15 @@ enum Which {
 fn selected(doc: &Document, d: &Dict, which: Which) -> bool {
     let subtype = d.name(b"Subtype").unwrap_or_default();
     match which {
+        // Comments are what the comment list calls comments: links, pop-ups and the non-markup
+        // multimedia and print-production annotations (3D, Screen, Movie, RichMedia,
+        // PrinterMark, TrapNet, Watermark) are neither comments nor fields, and stay (#3087).
         Which::Comments { comments, fields } => {
-            let widget = subtype == b"Widget";
-            !matches!(subtype, b"Link" | b"Popup") && (!widget || fields) && (widget || comments)
+            if subtype == b"Widget" {
+                fields
+            } else {
+                comments && pdfcraft_annot::is_comment_subtype(&String::from_utf8_lossy(subtype))
+            }
         }
         Which::FillSign => !matches!(subtype, b"Link" | b"Popup" | b"Widget") && pdfcraft_annot::is_fill_sign(doc, d),
     }
@@ -122,7 +129,16 @@ fn undrawn_on(doc: &Document, all: &[pdfcraft_model::Page], pages: &[usize], whi
     None
 }
 
+/// Runs [`flatten_in`] on a copy of `doc` (unchanged objects are shared) and keeps it only on
+/// success, so a page refused part way leaves the pages before it as they were.
 fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<usize, EditError> {
+    let mut work = doc.clone();
+    let drawn = flatten_in(&mut work, pages, which)?;
+    *doc = work;
+    Ok(drawn)
+}
+
+fn flatten_in(doc: &mut Document, pages: &[usize], which: Which) -> Result<usize, EditError> {
     let all = page_list(doc);
     check(pages, all.len())?;
     // `?` in an appearance can still be fixed (a field's value, a comment's text are stored as
@@ -154,6 +170,8 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             .unwrap_or_default();
         let mut gone: HashSet<ObjRef> = HashSet::new();
         let mut gone_inline: HashSet<usize> = HashSet::new();
+        // Selected, but nothing was drawn for it: it stays, pop-up and reply handling included.
+        let mut undrawn: HashSet<ObjRef> = HashSet::new();
         // A viewer draws many comments from their dictionary even when the file stores no
         // appearance (notes, FreeText, ink, stamps…). Build the appearance it would show, so
         // flattening keeps a comment that still has ink on screen instead of deleting it.
@@ -168,8 +186,9 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             if flags & (HIDDEN | NO_VIEW) != 0 || appearance(doc, &d).is_some() {
                 continue;
             }
-            // A subtype this build cannot draw only fails here; it is still removed below. (Text
-            // the standard fonts can't draw was refused before anything changed: `undrawn_on`.)
+            // A subtype this build cannot draw fails here and is kept below, so the comment is
+            // not deleted with nothing drawn in its place. (Text the standard fonts can't draw
+            // was refused before anything changed: `undrawn_on`.)
             let _ = pdfcraft_annot::set_appearance(doc, r);
         }
         for (k, entry) in list.iter().enumerate() {
@@ -185,6 +204,7 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
                 continue;
             }
             let rect = nums(doc, d.get(b"Rect")).filter(|r| r.len() == 4).map(|r| [r[0].min(r[2]), r[1].min(r[3]), r[0].max(r[2]), r[1].max(r[3])]);
+            let mut drew = false;
             if let (Some(ap), Some(rect)) = (appearance(doc, d), rect) {
                 let form = doc.get(ap).as_dict().cloned().unwrap_or_default();
                 if let Some(m) = placement(doc, &form, rect) {
@@ -192,6 +212,22 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
                     content.push_str(&format!("q {} {} {} {} {} {} cm /{name} Do Q\n", n(m[0]), n(m[1]), n(m[2]), n(m[3]), n(m[4]), n(m[5])));
                     xobjects.set(name.into_bytes(), Object::Ref(ap));
                     drawn += 1;
+                    drew = true;
+                }
+            }
+            // A comment whose ink was not written into the page stays. Removing it would drop
+            // the annotation (a cloudy square this builder cannot draw, for example) with nothing
+            // left on the page. A widget stays when it has no appearance to draw at all (none
+            // stored, or none for its selected state): removing it would lose the field's value
+            // with nothing in its place (#1794). One whose appearance draws nothing (an empty
+            // stream) shows nothing anywhere, so flattening still removes it.
+            if !drew {
+                let no_appearance = appearance(doc, d).is_none();
+                if no_appearance && let Some(r) = entry.as_ref() {
+                    undrawn.insert(r);
+                }
+                if !widget || no_appearance {
+                    continue;
                 }
             }
             match entry.as_ref() {
@@ -209,9 +245,13 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
         if gone.is_empty() && gone_inline.is_empty() {
             continue;
         }
-        // Pop-ups and replies of what was flattened go too.
+        // Pop-ups and replies of what was flattened go too, except a reply that stayed because
+        // it could not be drawn: its content would go with nothing in its place.
         for entry in &list {
             let Some(r) = entry.as_ref() else { continue };
+            if undrawn.contains(&r) {
+                continue;
+            }
             let obj = doc.get(r);
             let Some(d) = obj.as_dict() else { continue };
             let points_at = |k: &[u8]| d.reference(k).is_some_and(|t| gone.contains(&t));
@@ -249,33 +289,91 @@ fn flatten_which(doc: &mut Document, pages: &[usize], which: Which) -> Result<us
             })?,
         }
     }
-    if !removed_widgets.is_empty() {
-        prune_fields(doc, &removed_widgets)?;
+    // A field whose widgets are on no page has nothing to draw, but flattening every field of the
+    // document must still take it out of the form, or other software keeps seeing one (#1470).
+    let orphans = matches!(which, Which::Comments { fields: true, .. }) && (0..all.len()).all(|i| pages.contains(&i));
+    if !removed_widgets.is_empty() || orphans {
+        let on_page: HashSet<ObjRef> = page_list(doc)
+            .iter()
+            .filter_map(|p| p.dict.get(b"Annots").map(|a| doc.resolve(a)).and_then(|a| a.as_array().cloned()))
+            .flatten()
+            .filter_map(|e| e.as_ref())
+            .collect();
+        prune_fields(doc, &removed_widgets, orphans.then_some(&on_page))?;
     }
     Ok(drawn)
 }
 
-/// Remove flattened widgets from the AcroForm field tree, and fields left without widgets.
-fn prune_fields(doc: &mut Document, widgets: &HashSet<ObjRef>) -> Result<(), EditError> {
+#[cfg(test)]
+thread_local! {
+    /// How many field-tree nodes `prune_fields` visited on this thread.
+    pub(crate) static KEEP_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Remove flattened widgets from the AcroForm field tree, and fields left without widgets. With
+/// `on_page`, also the widgets (fields without kids) that are on no page.
+fn prune_fields(doc: &mut Document, widgets: &HashSet<ObjRef>, on_page: Option<&HashSet<ObjRef>>) -> Result<(), EditError> {
     let Some(root) = doc.root() else { return Ok(()) };
     let Some(af) = doc.get(root).as_dict().and_then(|d| d.get(b"AcroForm").cloned()) else { return Ok(()) };
     let af_ref = af.as_ref();
     let mut af_dict = doc.resolve(&af).as_dict().cloned().unwrap_or_default();
     let fields = af_dict.get(b"Fields").map(|f| doc.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
-    // Returns whether the node survives.
-    fn keep(doc: &mut Document, r: ObjRef, widgets: &HashSet<ObjRef>, depth: usize) -> bool {
-        if widgets.contains(&r) || depth > 64 {
-            return depth > 64;
+    // Returns whether the node survives, and whether that answer depends on the depth cutoff.
+    // `known` holds each node's answer once it is visited, so a node listed twice is pruned once,
+    // and one still being visited (a cycle) survives. An answer the cutoff decided records the depth
+    // it was reached at, and a shallower path visits the node again: at most once per depth.
+    fn keep(
+        doc: &mut Document,
+        r: ObjRef,
+        widgets: &HashSet<ObjRef>,
+        on_page: Option<&HashSet<ObjRef>>,
+        known: &mut HashMap<ObjRef, (bool, Option<usize>)>,
+        depth: usize,
+    ) -> (bool, bool) {
+        #[cfg(test)]
+        KEEP_CALLS.with(|c| c.set(c.get().saturating_add(1)));
+        if widgets.contains(&r) {
+            return (false, false);
         }
-        let Some(d) = doc.get(r).as_dict().cloned() else { return true };
-        let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()) else { return true };
-        let survivors: Vec<Object> = kids.iter().filter(|k| k.as_ref().is_none_or(|kr| keep(doc, kr, widgets, depth + 1))).cloned().collect();
+        if depth > 64 {
+            return (true, true);
+        }
+        match known.get(&r) {
+            Some(&(survives, None)) => return (survives, false),
+            Some(&(survives, Some(at))) if depth >= at => return (survives, true),
+            _ => {}
+        }
+        known.insert(r, (true, None));
+        let Some(d) = doc.get(r).as_dict().cloned() else { return (true, false) };
+        let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()) else {
+            let survives = on_page.is_none_or(|p| p.contains(&r));
+            known.insert(r, (survives, None));
+            return (survives, false);
+        };
+        let mut cut = false;
+        let survivors: Vec<Object> = kids
+            .iter()
+            .filter(|k| {
+                k.as_ref().is_none_or(|kr| {
+                    let (survives, kid_cut) = keep(doc, kr, widgets, on_page, known, depth + 1);
+                    cut |= kid_cut;
+                    survives
+                })
+            })
+            .cloned()
+            .collect();
         if survivors.len() != kids.len() {
             let _ = doc.update_dict(r, |d| d.set(b"Kids".to_vec(), Object::Array(survivors.clone())));
         }
-        !survivors.is_empty()
+        known.insert(r, (!survivors.is_empty(), cut.then_some(depth)));
+        (!survivors.is_empty(), cut)
     }
-    let survivors: Vec<Object> = fields.iter().filter(|f| f.as_ref().is_none_or(|r| keep(doc, r, widgets, 0))).cloned().collect();
+    let mut known = HashMap::new();
+    let survivors: Vec<Object> =
+        fields.iter().filter(|f| f.as_ref().is_none_or(|r| keep(doc, r, widgets, on_page, &mut known, 0).0)).cloned().collect();
+    if survivors.len() == fields.len() && widgets.is_empty() {
+        return Ok(()); // only looked for fields on no page, and there were none
+    }
     af_dict.set(b"Fields".to_vec(), Object::Array(survivors));
     match af_ref {
         Some(r) => doc.set(r, Object::Dict(af_dict)),

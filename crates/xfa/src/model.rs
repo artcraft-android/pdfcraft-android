@@ -155,6 +155,8 @@ pub struct FontSpec {
     pub italic: Option<bool>,
     pub underline: Option<bool>,
     pub color: Option<Color>,
+    /// `fontHorizontalScale`, as a fraction (0.9 for `90%`).
+    pub h_scale: Option<f64>,
 }
 
 /// A font with every property resolved.
@@ -166,16 +168,20 @@ pub struct Font {
     pub italic: bool,
     pub underline: bool,
     pub color: Color,
+    /// Horizontal scale of the glyphs, as a fraction (1.0: as designed).
+    pub h_scale: f64,
 }
 
 impl Default for Font {
     /// XFA's default font: Courier 10 pt.
     fn default() -> Self {
-        Font { typeface: "Courier".into(), size: 10.0, bold: false, italic: false, underline: false, color: Color::BLACK }
+        Font { typeface: "Courier".into(), size: 10.0, bold: false, italic: false, underline: false, color: Color::BLACK, h_scale: 1.0 }
     }
 }
 
 impl Font {
+    /// This font with the properties `spec` sets in place of its own; those `spec` leaves
+    /// `None` are inherited.
     pub fn apply(&self, spec: &FontSpec) -> Font {
         Font {
             typeface: spec.typeface.clone().unwrap_or_else(|| self.typeface.clone()),
@@ -184,6 +190,7 @@ impl Font {
             italic: spec.italic.unwrap_or(self.italic),
             underline: spec.underline.unwrap_or(self.underline),
             color: spec.color.unwrap_or(self.color),
+            h_scale: spec.h_scale.unwrap_or(self.h_scale),
         }
     }
 }
@@ -225,6 +232,36 @@ impl VAlign {
             Some("bottom") => Some(VAlign::Bottom),
             _ => None,
         }
+    }
+}
+
+/// Which point of a positioned object's box its `x` and `y` give (`anchorType`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Anchor {
+    /// Fraction of the width left of the point: 0 left, 0.5 centre, 1 right.
+    pub h: f64,
+    /// Fraction of the height above the point: 0 top, 0.5 middle, 1 bottom.
+    pub v: f64,
+}
+
+impl Anchor {
+    pub fn parse(s: Option<&str>) -> Anchor {
+        let s = s.map(str::trim).unwrap_or("");
+        let v = if s.starts_with("middle") {
+            0.5
+        } else if s.starts_with("bottom") {
+            1.0
+        } else {
+            0.0
+        };
+        let h = if s.ends_with("Center") {
+            0.5
+        } else if s.ends_with("Right") {
+            1.0
+        } else {
+            0.0
+        };
+        Anchor { h, v }
     }
 }
 
@@ -276,6 +313,7 @@ pub struct Common {
     pub id: Option<String>,
     pub x: Option<f64>,
     pub y: Option<f64>,
+    pub anchor: Anchor,
     pub w: Option<f64>,
     pub h: Option<f64>,
     pub min_w: Option<f64>,
@@ -300,6 +338,13 @@ pub enum Node {
     ExclGroup(Box<ExclGroup>),
 }
 
+impl Common {
+    /// The top-left corner of a positioned box of `w` by `h`, from `x`, `y` and the anchor.
+    pub fn top_left(&self, w: f64, h: f64) -> (f64, f64) {
+        (self.x.unwrap_or(0.0) - w * self.anchor.h, self.y.unwrap_or(0.0) - h * self.anchor.v)
+    }
+}
+
 impl Node {
     pub fn common(&self) -> &Common {
         match self {
@@ -309,6 +354,30 @@ impl Node {
             Node::Draw(d) => &d.common,
             Node::ExclGroup(g) => &g.common,
         }
+    }
+}
+
+pub(crate) struct SomIndices(Vec<usize>);
+
+impl SomIndices {
+    pub(crate) fn of(children: &[Node]) -> Self {
+        let mut seen = std::collections::HashMap::new();
+        SomIndices(
+            children
+                .iter()
+                .map(|c| {
+                    c.common().name.as_deref().map_or(0, |name| {
+                        let n = seen.entry(name).or_insert(0);
+                        *n += 1;
+                        *n - 1
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn at(&self, i: usize) -> usize {
+        self.0.get(i).copied().unwrap_or(0)
     }
 }
 
@@ -431,6 +500,9 @@ pub struct Field {
     pub access: Access,
     /// The edit picture clause (`<ui>…<picture>`), e.g. `date{YYYY-MM-DD}`.
     pub picture: Option<String>,
+    /// The data picture clause (`<bind>…<picture>`), e.g. `date{YYYYMMDD}`: how the value is
+    /// written in the data. Without one, dates there are ISO.
+    pub data_picture: Option<String>,
     /// `<event activity="…"><script>`: click, change, exit, initialize, …
     pub scripts: Vec<Script>,
     /// `<calculate><script>`: the value is the script's result.
@@ -441,9 +513,17 @@ pub struct Field {
     pub validate_message: Option<String>,
     /// Numeric fields (numericEdit, or a decimal/integer/float value) give scripts numbers.
     pub numeric: bool,
+    /// The display picture clause (`<format><picture>`), e.g. `date{YYYYMMDD}`: how the value
+    /// shows when not being edited, and what scripts read as `formattedValue`.
+    pub display_picture: Option<String>,
 }
 
 impl Field {
+    /// Whether the text can determine this field's height.
+    pub(crate) fn grows_with_text(&self) -> bool {
+        self.ui == Ui::TextEdit && self.multiline && self.common.h.is_none()
+    }
+
     /// A choice list's value as saved to the data: an item's shown text becomes its saved
     /// value (an editable list keeps typed text); several values stay on separate lines.
     /// Other fields keep `v`.
@@ -549,6 +629,8 @@ pub struct Run {
     pub italic: Option<bool>,
     pub underline: Option<bool>,
     pub size: Option<f64>,
+    /// `xfa-font-horizontal-scale`, as a fraction.
+    pub h_scale: Option<f64>,
     /// A floating field embedded in the text (`xfa:embed="#id"`), shown by its value.
     pub embed: Option<String>,
 }
@@ -618,6 +700,9 @@ pub struct PageArea {
     pub items: Vec<Node>,
     /// How many pages may use this master (`None`: unbounded).
     pub occur_max: Option<usize>,
+    /// How many pages must use this master: a layout that ends with fewer adds pages for it.
+    /// Zero without an `<occur>`.
+    pub occur_min: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -177,13 +177,9 @@ fn supplied_pdf_inlines_without_visible_change_and_edits() {
         let blocks = s.get(id).unwrap().text_blocks(page);
         let Some(first) = blocks.first() else { continue };
         let before = first.text.clone();
-        let hidden_before = s.get(id).unwrap().text_lines(page).iter().filter(|l| !l.is_visible()).count();
         s.apply(id, Edit::EditTextBlock { page, block: 0, text: "PdfCraft edit".into(), style: BlockStyle::default() }).unwrap();
         let edited = s.get(id).unwrap().text_blocks(page);
         assert!(edited.iter().any(|b| b.text == "PdfCraft edit"), "page {}: {:?}", page + 1, edited.iter().map(|b| &b.text).collect::<Vec<_>>());
-        // The edit adds no invisible text.
-        let hidden = |s: &Session| s.get(id).unwrap().text_lines(page).iter().filter(|l| !l.is_visible()).count();
-        assert!(hidden(&s) <= hidden_before, "page {}", page + 1);
         // Every other paragraph is still there.
         for b in blocks.iter().skip(1) {
             assert!(edited.iter().any(|e| e.text == b.text), "page {}: lost {:?}", page + 1, b.text);

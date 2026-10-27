@@ -13,14 +13,14 @@ use super::*;
 const MAX_PAGE_GLYPHS: usize = 1_000_000;
 
 /// A run of text and what reading needs to know about it beyond the run itself.
-struct Run {
-    shown: Shown,
-    stream: usize,
+pub(super) struct Run {
+    pub(super) shown: Shown,
+    pub(super) stream: usize,
     /// Position in reading the page's content, across forms.
-    order: usize,
-    color: [f64; 3],
+    pub(super) order: usize,
+    pub(super) color: [f64; 3],
     /// Drawn with no visible fill: alpha 0, or rendering mode 3 or 7.
-    invisible: bool,
+    pub(super) invisible: bool,
 }
 
 /// One glyph of an upright run, in user space.
@@ -34,73 +34,24 @@ struct Glyph {
 }
 
 /// Where a form XObject paints a gradient (pattern or shading), and its average colour.
-type Paint = ([f64; 4], [f64; 3]);
+pub(super) type Gradient = ([f64; 4], [f64; 3]);
 
-pub(super) fn reading_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditError> {
-    struct Walk<'a> {
-        doc: &'a Document,
-        runs: Vec<Run>,
-        paints: Vec<Paint>,
-        next_stream: usize,
-        path: Vec<pdfcraft_cos::ObjRef>,
-        visits: usize,
+/// A run's colour as a reader sees it: a gradient pattern's average, else its fill.
+pub(super) fn run_colour(doc: &Document, resources: &Dict, fill: &[Op]) -> [f64; 3] {
+    pattern_color(doc, resources, fill).unwrap_or_else(|| fill_color(fill))
+}
+
+/// Whether a run paints nothing a reader can see: invisible or clip-only text (rendering modes
+/// 3 and 7), or text filled or stroked at zero opacity.
+pub(super) fn invisible(s: &Shown) -> bool {
+    let gs = &s.state.gs;
+    match s.state.render_mode {
+        0 | 4 => gs.fill_alpha <= 0.0,
+        1 | 5 => gs.stroke_alpha <= 0.0,
+        2 | 6 => gs.fill_alpha <= 0.0 && gs.stroke_alpha <= 0.0,
+        3 | 7 => true,
+        _ => false,
     }
-    fn walk(w: &mut Walk, ops: &[Op], resources: &Dict, carry: &mut Carry, stream: usize) {
-        let fonts_res = resources.get(b"Font").and_then(|f| w.doc.dict(f)).unwrap_or_default();
-        let states = resources.get(b"ExtGState").and_then(|f| w.doc.dict(f));
-        let mut cache = HashMap::new();
-        let mut invoked = Vec::new();
-        carry.states = states;
-        let shown = interpret(w.doc, ops, &fonts_res, &mut cache, carry, Some(&mut invoked), true);
-        let mut forms = invoked.into_iter().peekable();
-        for s in shown {
-            while let Some((_, name, ts)) = forms.next_if(|f| f.0 < s.op) {
-                enter(w, resources, &name, ts);
-            }
-            let color = pattern_color(w.doc, resources, &s.state.fill).unwrap_or_else(|| fill_color(&s.state.fill));
-            let invisible = !shown_visible(&s);
-            let order = w.runs.len();
-            w.runs.push(Run { shown: s, stream, order, color, invisible });
-        }
-        for (_, name, ts) in forms {
-            enter(w, resources, &name, ts);
-        }
-    }
-    fn enter(w: &mut Walk, resources: &Dict, name: &[u8], ts: Ts) {
-        let Some(form) = form_call(w.doc, resources, name, ts.ctm, &w.path, &mut w.visits) else { return };
-        let ops = parse(&form.data).ops;
-        if let Some(paint) = form_paint(w.doc, &form, &ops) {
-            w.paints.push(paint);
-        }
-        // The form starts with the graphics state at its `Do`, its own matrix applied.
-        let mut carry = Carry { ts: Ts { ctm: form.ctm, ..ts }, stack: Vec::new(), marked: Vec::new(), states: None };
-        let stream = w.next_stream;
-        w.next_stream = w.next_stream.saturating_add(1);
-        if let Some(r) = form.obj {
-            w.path.push(r);
-        }
-        walk(w, &ops, &form.resources, &mut carry, stream);
-        if form.obj.is_some() {
-            w.path.pop();
-        }
-    }
-    let p = page_dict(doc, page)?;
-    let res = p.dict.get(b"Resources").and_then(|r| doc.dict(r)).unwrap_or_default();
-    let streams = content_streams(doc, &p.dict);
-    let mut w = Walk { doc, runs: Vec::new(), paints: Vec::new(), next_stream: streams.len(), path: Vec::new(), visits: 0 };
-    let mut carry = Carry::new();
-    for (si, (_, data)) in streams.into_iter().enumerate() {
-        walk(&mut w, &parse(&data).ops, &res, &mut carry, si);
-    }
-    let Walk { mut runs, paints, .. } = w;
-    // Text drawn invisibly over a gradient a form paints (how browsers print gradient-filled
-    // text: the visible copy is a masked gradient) reads in the gradient's colour.
-    for run in runs.iter_mut().filter(|r| r.invisible) {
-        if let Some((_, c)) = paints.iter().find(|(area, _)| covers(*area, run.shown.rect)) {
-            run.color = *c;
-        }
-    }
-    Ok(lines_of(runs))
 }
 
 /// Whether `area` covers most of `rect`.
@@ -118,15 +69,27 @@ fn upright(s: &Shown) -> bool {
     m[0] > 0.0 && m[3] > 0.0 && m[1].abs() <= m[0] * 1e-3 && m[2].abs() <= m[3] * 1e-3
 }
 
-/// Lines from runs: upright runs rebuilt from their glyphs, the others joined as runs.
-fn lines_of(runs: Vec<Run>) -> Vec<TextLine> {
+/// Lines from runs: upright runs rebuilt from their glyphs, the others joined as runs. Text drawn
+/// invisibly over a gradient a form paints (how browsers print gradient-filled text: the visible
+/// copy is a masked gradient) reads in the gradient's colour.
+pub(super) fn lines_of(mut runs: Vec<Run>, gradients: &[Gradient]) -> Vec<TextLine> {
+    for run in runs.iter_mut().filter(|r| r.invisible) {
+        if let Some((_, c)) = gradients.iter().find(|(area, _)| covers(*area, run.shown.rect)) {
+            run.color = *c;
+        }
+    }
     let mut glyphs: Vec<Glyph> = Vec::new();
     // Run-based lines, and the order key of the run that started each.
     let mut run_lines: Vec<TextLine> = Vec::new();
     let mut keys: Vec<usize> = Vec::new();
     let mut last = None;
+    let mut last_stream = None;
     for (i, run) in runs.iter().enumerate() {
         let s = &run.shown;
+        // Text from another stream or form starts a new line, as when each was read alone.
+        if last_stream.replace(run.stream).is_some_and(|prev| prev != run.stream) {
+            last = None;
+        }
         if upright(s) && glyphs.len().saturating_add(s.glyphs.len()) <= MAX_PAGE_GLYPHS {
             for (text, x0, x1) in &s.glyphs {
                 if x0.is_finite() && x1.is_finite() && s.baseline.is_finite() {
@@ -299,38 +262,28 @@ fn segment_line(runs: &[Run], glyphs: Vec<Glyph>) -> Option<(usize, TextLine)> {
     ops.dedup();
     let order = members.iter().filter_map(|i| runs.get(*i)).map(|r| r.order).min().unwrap_or(0);
     let stream = members.iter().filter_map(|i| runs.get(*i)).map(|r| r.stream).min().unwrap_or(0);
-    let s = &origin_run.shown;
     let face = face_name(&style.shown.base_font).to_owned();
-    let line = TextLine {
-        text,
-        rect: [x0, y0, x1, y1],
-        // Subsets of one face are one font to a reader.
-        font: face.clone(),
-        base_font: face,
-        size: style.shown.size,
-        bold: style.shown.bold,
-        italic: style.shown.italic,
-        color: style.color,
-        decodable: members.iter().filter_map(|i| runs.get(*i)).all(|r| r.shown.decodable),
-        face: style.shown.face.clone(),
-        stream,
-        scope: s.scope,
-        visible: members.iter().filter_map(|i| runs.get(*i)).any(|r| !r.invisible),
-        alpha: s.state.alpha,
-        clip: s.state.clip,
-        ops,
-        origin: Origin {
-            tm: s.tm.0,
-            tlm: s.tlm.0,
-            k: (s.tm.then(&s.state.ctm).0[2].powi(2) + s.tm.then(&s.state.ctm).0[3].powi(2)).sqrt(),
-            ctm: s.state.ctm.0,
-            baseline: first.base,
-            x: x0,
-            state: TextState::of(&s.state),
-            bt_op: s.bt_op,
-            bt_state: TextState::of(&s.bt_state),
-        },
-    };
+    let mut base = Vec::new();
+    add_shown(&mut base, &mut None, origin_run.shown.clone(), stream);
+    let mut line = base.pop()?;
+    let rect = [x0, y0, x1, y1];
+    line.text = text;
+    line.rect = rect;
+    line.frame = rect;
+    line.ink = vec![rect];
+    // Subsets of one face are one font to a reader.
+    line.font = face.clone();
+    line.base_font = face;
+    line.size = style.shown.size;
+    line.bold = style.shown.bold;
+    line.italic = style.shown.italic;
+    line.color = style.color;
+    line.decodable = members.iter().filter_map(|i| runs.get(*i)).all(|r| r.shown.decodable);
+    line.face = style.shown.face.clone();
+    line.stream = stream;
+    line.ops = ops;
+    line.origin.baseline = first.base;
+    line.origin.x = x0;
     Some((order, line))
 }
 
@@ -436,7 +389,7 @@ fn collect_stops(doc: &Document, f: &Object, out: &mut Vec<Vec<f64>>, depth: usi
 }
 
 /// Where a form paints a gradient, from the patterns it fills with and the shadings it draws.
-fn form_paint(doc: &Document, form: &FormCall, ops: &[Op]) -> Option<Paint> {
+pub(super) fn form_paint(doc: &Document, form: &FormCall, ops: &[Op]) -> Option<Gradient> {
     let shadings = form.resources.get(b"Shading").and_then(|s| doc.dict(s));
     let mut colors = Vec::new();
     for (i, op) in ops.iter().enumerate().take(100_000) {
@@ -528,7 +481,7 @@ pub fn remove_all_text(doc: &mut Document) {
         doc.set(r, Stream::flate(dict, &data));
     }
     for page in pdfcraft_model::pages(doc) {
-        let streams = content_streams(doc, &page.dict);
+        let Ok(streams) = content_streams(doc, &page.dict) else { continue };
         let joined: Vec<u8> = streams.iter().flat_map(|(_, d)| d.iter().copied().chain(std::iter::once(b'\n'))).collect();
         let Some(data) = strip(&joined) else { continue };
         let contents = doc.add(Stream::flate(Dict::new(), &data));

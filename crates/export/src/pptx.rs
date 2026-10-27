@@ -270,7 +270,7 @@ fn slide<'a>(page: &'a Page, size: [f64; 2], media_count: &mut usize) -> (String
     let mut id = 1usize;
     // Artwork at the back, then tables, then text on top. A rendered background already holds
     // the page's pictures (and its vector art), so they aren't placed again.
-    let background = page.background.as_ref().filter(|im| !im.bytes.is_empty());
+    let background = page.artwork.as_ref().filter(|im| !im.bytes.is_empty());
     if let Some(im) = background {
         id = id.saturating_add(1);
         *media_count = media_count.saturating_add(1);

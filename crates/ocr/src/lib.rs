@@ -190,6 +190,23 @@ impl PlacedWord {
 /// Helvetica's ascender and descender (em fractions): a word box spans about this much.
 const BOX_EM: f64 = 0.93;
 const DESCENT: f64 = 0.21;
+/// Helvetica's cap height and x-height (em fractions).
+const CAP_HEIGHT: f64 = 0.718;
+const X_HEIGHT: f64 = 0.523;
+
+/// How far `text`'s ink reaches above and below the baseline, in em fractions: a word box is
+/// tight around the ink, so "DT" spans the cap height only, "sun" the x-height, and "gap" reaches
+/// down to the descender. Text without letters or digits keeps the full ascender-descender span.
+fn ink_extent(text: &str) -> (f64, f64) {
+    if !text.chars().any(char::is_alphanumeric) {
+        return (BOX_EM - DESCENT, -DESCENT);
+    }
+    let tall = text
+        .chars()
+        .any(|c| c.is_uppercase() || c.is_ascii_digit() || "bdfhijklt!?/\\()[]{}|'\"#$%&@".contains(c) || (c.is_alphabetic() && !c.is_ascii()));
+    let low = text.chars().any(|c| "gjpqy()[]{}|_".contains(c));
+    (if tall { CAP_HEIGHT } else { X_HEIGHT }, if low { -DESCENT } else { 0.0 })
+}
 
 fn num(v: f64) -> String {
     let s = format!("{:.4}", if v.abs() < 1e-9 { 0.0 } else { v });
@@ -201,17 +218,22 @@ fn num(v: f64) -> String {
 /// WinAnsiEncoding), each word stretched to its box so selection and search highlight the
 /// right place. Marked content `/OCR` so it can be told apart from the page's own text.
 pub fn text_layer(words: &[PlacedWord]) -> Vec<u8> {
-    let mut out = b"/OCR BMC\nBT\n3 Tr\n/PCHelv 1 Tf\n".to_vec();
+    // `3 Tr` and the font are graphics state, which `ET` doesn't reset: without `q … Q` they
+    // would stay set for every later content stream on the page, so text added after OCR (a
+    // header or footer) drew invisibly (#3029).
+    let mut out = b"/OCR BMC\nq\nBT\n3 Tr\n/PCHelv 1 Tf\n".to_vec();
     for w in words {
         let width = helvetica_width(&w.text, 1.0);
         let height = w.up[0].hypot(w.up[1]);
         if width <= 0.0 || height <= 0.0 {
             continue;
         }
-        // The em square: its height spans the box; its width is stretched to fit the word.
-        let em = [w.up[0] / BOX_EM, w.up[1] / BOX_EM];
+        // The em square: the word's own ink (cap height or x-height, descenders or not) spans the
+        // box, so the text is as tall as the scanned word; its width is stretched to fit the word.
+        let (top, bottom) = ink_extent(&w.text);
+        let em = [w.up[0] / (top - bottom), w.up[1] / (top - bottom)];
         let ax = [w.across[0] / width, w.across[1] / width];
-        let o = [w.origin[0] + em[0] * DESCENT, w.origin[1] + em[1] * DESCENT];
+        let o = [w.origin[0] - em[0] * bottom, w.origin[1] - em[1] * bottom];
         let m = [ax[0], ax[1], em[0], em[1], o[0], o[1]];
         let nums: Vec<String> = m.iter().map(|v| num(*v)).collect();
         out.extend_from_slice(nums.join(" ").as_bytes());
@@ -219,7 +241,7 @@ pub fn text_layer(words: &[PlacedWord]) -> Vec<u8> {
         out.extend(pdfcraft_fonts::literal(&pdfcraft_fonts::win_ansi(&w.text)));
         out.extend_from_slice(b" Tj\n");
     }
-    out.extend_from_slice(b"ET\nEMC\n");
+    out.extend_from_slice(b"ET\nQ\nEMC\n");
     out
 }
 
@@ -251,8 +273,46 @@ mod tests {
         let s = String::from_utf8(text_layer(&[w])).unwrap();
         assert!(s.contains("3 Tr") && s.contains("/PCHelv 1 Tf"), "{s}");
         let width = helvetica_width("Hi", 1.0);
-        assert!(s.contains(&format!("{} 0 0 10 10 22.1 Tm (Hi) Tj", num(30.0 / width))), "{s}");
+        // "Hi" has no descender: its box spans the cap height, from the baseline up.
+        assert!(s.contains(&format!("{} 0 0 {} 10 20 Tm (Hi) Tj", num(30.0 / width), num(9.3 / CAP_HEIGHT))), "{s}");
         assert!(s.starts_with("/OCR BMC") && s.ends_with("EMC\n"));
+    }
+
+    /// #3029: the layer's invisible rendering mode and font end with the layer. Every operator
+    /// that sets them sits inside a `q … Q` pair that the layer closes itself, so content drawn
+    /// after it on the page starts from the graphics state it had before.
+    #[test]
+    fn the_layer_restores_the_graphics_state_it_changes() {
+        let w = PlacedWord { text: "Hi".into(), origin: [10.0, 20.0], across: [30.0, 0.0], up: [0.0, 9.3] };
+        let s = String::from_utf8(text_layer(&[w])).unwrap();
+        let mut depth = 0_i32;
+        for token in s.split_ascii_whitespace() {
+            match token {
+                "q" => depth += 1,
+                "Q" => depth -= 1,
+                "Tr" | "Tf" | "Tm" => assert!(depth > 0, "`{token}` outside q … Q in {s:?}"),
+                _ => {}
+            }
+            assert!(depth >= 0, "unbalanced Q in {s:?}");
+        }
+        assert_eq!(depth, 0, "the layer leaves a q open: {s:?}");
+    }
+
+    /// A word box is tight around the ink, so the text's size and baseline come from the letters:
+    /// capitals, lowercase without ascenders, descenders.
+    #[test]
+    fn the_text_is_as_tall_as_the_scanned_word() {
+        assert_eq!(ink_extent("DT"), (CAP_HEIGHT, 0.0));
+        assert_eq!(ink_extent("402337"), (CAP_HEIGHT, 0.0));
+        assert_eq!(ink_extent("sun"), (X_HEIGHT, 0.0));
+        assert_eq!(ink_extent("gap"), (X_HEIGHT, -DESCENT));
+        assert_eq!(ink_extent("Gallus.Ze@camtel.cm"), (CAP_HEIGHT, 0.0));
+        assert_eq!(ink_extent("Corporation"), (CAP_HEIGHT, -DESCENT));
+        assert_eq!(ink_extent("--"), (BOX_EM - DESCENT, -DESCENT));
+        let w = PlacedWord { text: "gap".into(), origin: [0.0, 100.0], across: [20.0, 0.0], up: [0.0, 7.3] };
+        let s = String::from_utf8(text_layer(&[w])).unwrap();
+        let em = 7.3 / (X_HEIGHT + DESCENT);
+        assert!(s.contains(&format!(" 0 0 {} 0 {} Tm (gap) Tj", num(em), num(100.0 + em * DESCENT))), "{s}");
     }
 
     #[test]

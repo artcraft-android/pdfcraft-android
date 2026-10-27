@@ -69,7 +69,16 @@ pub(crate) fn show_glyph<'a>(
     device.set_blend_mode(ctx.get().graphics_state.blend_mode);
     let stroke_props = ctx.stroke_props();
 
-    match ctx.get().text_state.render_mode {
+    // PdfCraft patch: only mode 3 has any effect on text in a Type 3 font (ISO 32000-1
+    // 9.3.6). Stroking ran the glyph procedure a second time, so `2 Tr` made bitmap fonts
+    // look bold, and the clip modes have no outline to clip with.
+    let render_mode = match (glyph, ctx.get().text_state.render_mode) {
+        (Glyph::Type3(_), TextRenderingMode::Invisible) => TextRenderingMode::Invisible,
+        (Glyph::Type3(_), _) => TextRenderingMode::Fill,
+        (_, mode) => mode,
+    };
+
+    match render_mode {
         TextRenderingMode::Fill => {
             device.draw_glyph(
                 glyph,
@@ -117,6 +126,16 @@ pub(crate) fn show_glyph<'a>(
         }
         TextRenderingMode::Clip => {
             clip_glyph(ctx, glyph, glyph_transform);
+            // PdfCraft patch: report clipping text separately from invisible OCR text.
+            // Extraction filters must retain text that is filled through its
+            // clipping path without rendering devices drawing it directly.
+            device.draw_glyph(
+                glyph,
+                ctx.get().ctm,
+                glyph_transform,
+                &get_paint(ctx, false),
+                &GlyphDrawMode::Clip,
+            );
         }
         TextRenderingMode::FillAndClip => {
             clip_glyph(ctx, glyph, glyph_transform);

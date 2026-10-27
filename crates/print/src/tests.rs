@@ -155,9 +155,11 @@ fn multiple_pages_per_sheet() {
     assert_eq!(two[0].size, (792.0, 612.0));
     assert!(two[0].placed[1].matrix.0[4] > two[0].placed[0].matrix.0[4]);
     // Vertical order and borders.
-    let v =
-        layout(&sizes, &settings(vec![0, 1, 2], Layout::Multiple { cols: 2, rows: 2, order: PageOrder::Vertical, border: true, auto_rotate: false }))
-            .unwrap();
+    let v = layout(
+        &sizes,
+        &settings(vec![0, 1, 2], Layout::Multiple { cols: 2, rows: 2, per_sheet: 4, order: PageOrder::Vertical, border: true, auto_rotate: false }),
+    )
+    .unwrap();
     assert!(close(v[0].placed[1].matrix.0[4], v[0].placed[0].matrix.0[4]) && v[0].placed[1].matrix.0[5] < v[0].placed[0].matrix.0[5]);
     assert_eq!(v[0].borders.len(), 3);
     // Auto-rotate turns a landscape page in a portrait cell.
@@ -166,6 +168,39 @@ fn multiple_pages_per_sheet() {
     assert_eq!(r[0].size, (792.0, 612.0));
     assert!(r[0].placed[0].matrix.0[0] > 0.0);
     assert_eq!(r[0].placed[1].matrix.0[0], 0.0, "rotated");
+}
+
+#[test]
+fn custom_pages_per_sheet_never_overfill_the_grid() {
+    // Three per sheet draws on a 2 × 2 grid, five on 3 × 2: the spare cells stay blank (#1336).
+    let sizes = vec![(200.0, 300.0); 7];
+    let pages = |per: usize| sheet_pages(&layout(&sizes, &settings((0..7).collect(), Layout::multiple(per))).unwrap());
+    assert_eq!(pages(3), [vec![0, 1, 2], vec![3, 4, 5], vec![6]]);
+    assert_eq!(pages(5), [vec![0, 1, 2, 3, 4], vec![5, 6]]);
+    assert_eq!(pages(7), [vec![0, 1, 2, 3, 4, 5, 6]]);
+    assert_eq!(pages(4), [vec![0, 1, 2, 3], vec![4, 5, 6]]);
+    assert_eq!(pages(2), [vec![0, 1], vec![2, 3], vec![4, 5], vec![6]]);
+    // Cut-stack piles take the requested count too.
+    let stacked = Layout::Multiple { cols: 2, rows: 2, per_sheet: 3, order: PageOrder::CutStack, border: false, auto_rotate: false };
+    assert_eq!(sheet_pages(&layout(&sizes, &settings((0..7).collect(), stacked)).unwrap()), [vec![0, 3, 6], vec![1, 4], vec![2, 5]]);
+    // A count larger than the grid is capped by the grid; no pages per sheet is refused.
+    let grid = |per_sheet| Layout::Multiple { cols: 2, rows: 1, per_sheet, order: PageOrder::Horizontal, border: false, auto_rotate: false };
+    assert_eq!(sheet_pages(&layout(&sizes[..3], &settings(vec![0, 1, 2], grid(9))).unwrap()), [vec![0, 1], vec![2]]);
+    assert!(matches!(layout(&sizes, &settings(vec![0], grid(0))), Err(PrintError::Invalid(_))));
+    // The imposed PDF has one page per sheet.
+    let out = impose(&fixture(7), &settings((0..7).collect(), Layout::multiple(3))).unwrap();
+    assert_eq!(pdfcraft_model::pages(&Document::open(Arc::new(out)).unwrap()).len(), 3);
+}
+
+#[test]
+fn imposing_lists_the_pages_once() {
+    let n = 150;
+    let doc = fixture(n);
+    PAGES_LISTED.with(|c| c.set(0));
+    let out = impose(&doc, &settings((0..n).collect(), Layout::multiple(2))).unwrap();
+    let listed = PAGES_LISTED.with(|c| c.get());
+    assert!(listed <= 2 * n, "{listed} pages listed to print {n}");
+    assert_eq!(pdfcraft_model::pages(&Document::open(Arc::new(out)).unwrap()).len(), n / 2);
 }
 
 #[test]
@@ -190,6 +225,17 @@ fn posters_tile_with_overlap() {
     let c1 = sheets[1].placed[0].clip;
     assert!(close(c0[2] - c1[0], 36.0 / 4.0), "neighbouring tiles share the overlap");
     assert!(layout(&[(200.0, 300.0)], &settings(vec![0], Layout::Poster { scale: 400.0, overlap: 400.0, cut_marks: false })).is_err());
+}
+
+/// Issue #1335: a scale so large that the tile counts saturate is refused with the sheet-limit
+/// error, not an overflow in counting the sheets.
+#[test]
+fn huge_posters_are_refused_at_the_sheet_limit() {
+    let refused = Err(PrintError::Invalid("the poster would need more than 1024 sheets".into()));
+    for scale in [100_000.0, 1e22, f64::MAX] {
+        let poster = settings(vec![0], Layout::Poster { scale, overlap: 18.0, cut_marks: true });
+        assert_eq!(layout(&[(200.0, 300.0)], &poster), refused, "scale {scale}");
+    }
 }
 
 #[test]
@@ -298,7 +344,7 @@ fn driverless_printers_join_the_list_without_a_queue() {
 }
 
 fn cut_stack(cols: usize, rows: usize) -> Layout {
-    Layout::Multiple { cols, rows, order: PageOrder::CutStack, border: false, auto_rotate: false }
+    Layout::Multiple { cols, rows, per_sheet: cols.saturating_mul(rows), order: PageOrder::CutStack, border: false, auto_rotate: false }
 }
 
 #[test]
@@ -351,7 +397,7 @@ fn cutting_and_stacking_recovers_every_selected_page() {
 fn multiple_rejects_hostile_grids_without_panicking() {
     let sizes = [(200.0, 300.0)];
     for (cols, rows) in [(usize::MAX, 2), (2, usize::MAX), (0, 2), (1, 0), (257, 1)] {
-        let mode = Layout::Multiple { cols, rows, order: PageOrder::Horizontal, border: false, auto_rotate: false };
+        let mode = Layout::Multiple { cols, rows, per_sheet: 1, order: PageOrder::Horizontal, border: false, auto_rotate: false };
         assert!(matches!(layout(&sizes, &settings(vec![0], mode)), Err(PrintError::Invalid(_))));
     }
     let tiny = Settings { paper: (72.0, 72.0), ..settings(vec![0], cut_stack(16, 16)) };
@@ -458,6 +504,147 @@ fn printer_option_defaults_and_job_arguments() {
     assert!(spool::printer_options("../../etc/passwd").is_empty(), "not a queue name");
 }
 
+#[cfg(all(unix, not(target_arch = "wasm32")))]
+mod cups_options {
+    use crate::spool;
+
+    const RECORD: &str = "PDFCRAFT_LPOPTIONS_TEST_RECORD";
+    const ANSWER: &str = "PDFCRAFT_LPOPTIONS_TEST_ANSWER";
+    /// Generous: these tests are about what is read, not how long it takes.
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    /// The child process stands in for lpoptions, recording its real arguments.
+    #[test]
+    fn stand_in_for_lpoptions() {
+        let Some(record) = std::env::var_os(RECORD) else { return };
+        let args: Vec<String> = std::env::args().skip_while(|a| a != "--").skip(1).collect();
+        std::fs::write(std::path::Path::new(&record).join("args"), args.join("\n")).unwrap();
+        let answer = std::env::var(ANSWER).unwrap();
+        // A queue that never answers (CUPS stopped responding).
+        if answer == "HANG" {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+        // Serial libtest prints its test label without a newline before this helper's stdout.
+        println!("\n{answer}");
+    }
+
+    /// `lpoptions` that never answers is stopped at the deadline: the PPD's defaults stand and
+    /// whoever asked is not held (#1818).
+    #[test]
+    fn a_queue_that_never_answers_is_given_up_at_the_deadline() {
+        let dir = folder();
+        std::fs::write(
+            dir.join("Office.ppd"),
+            "*OpenUI *InputSlot/Paper tray: PickOne\n*DefaultInputSlot: Auto\n*InputSlot Auto/Automatic: \"\"\n*InputSlot Tray2/Tray 2: \"\"\n*CloseUI: *InputSlot\n",
+        )
+        .unwrap();
+        let started = std::time::Instant::now();
+        let options = spool::printer_options_via_within("Office", &dir, command(&dir, "HANG"), std::time::Duration::from_millis(500), "en");
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "given up at the deadline, not when the command does");
+        assert_eq!(options.len(), 1, "the PPD is still read");
+        assert_eq!(options[0].default, "Auto", "the PPD default stands when the queue does not answer");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn command(record: &std::path::Path, answer: &str) -> std::process::Command {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.args(["--exact", "tests::cups_options::stand_in_for_lpoptions", "--nocapture", "--"]).env(RECORD, record).env(ANSWER, answer);
+        c
+    }
+
+    fn folder() -> std::path::PathBuf {
+        use std::io::Read as _;
+        use std::os::unix::fs::DirBuilderExt as _;
+        let mut random = std::fs::File::open("/dev/urandom").unwrap();
+        for _ in 0..32 {
+            let mut nonce = [0; 16];
+            random.read_exact(&mut nonce).unwrap();
+            let path = std::env::temp_dir().join(format!("pdfcraft-cups-options-{:032x}", u128::from_be_bytes(nonce)));
+            // Atomic creation, private permissions from the outset; never reuse an existing
+            // path (including a symlink) in the shared temporary directory.
+            match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => return path,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => panic!("create private CUPS test directory: {e}"),
+            }
+        }
+        panic!("could not create a unique CUPS test directory");
+    }
+
+    #[test]
+    fn instances_read_the_queue_ppd_and_their_own_defaults() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = folder();
+        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        // One synthetic queue PPD; there is deliberately no Office/ subdirectory.
+        std::fs::write(
+            dir.join("Office.ppd"),
+            "*OpenUI *InputSlot/Paper tray: PickOne\n*DefaultInputSlot: Auto\n*InputSlot Auto/Automatic: \"\"\n*InputSlot Tray2/Tray 2: \"\"\n*CloseUI: *InputSlot\n",
+        )
+        .unwrap();
+        let boundary_queue = "Q".repeat(64);
+        let boundary_instance = format!("Office/{}", "I".repeat(64));
+        std::fs::copy(dir.join("Office.ppd"), dir.join(format!("{boundary_queue}.ppd"))).unwrap();
+        for (destination, current, expected) in [
+            ("Office", "Auto", "Auto"),
+            ("Office/duplex", "Tray2", "Tray2"),
+            ("Office/draft", "Auto", "Auto"),
+            ("Office/unknown-default", "Bogus", "Auto"),
+            (boundary_queue.as_str(), "Tray2", "Tray2"),
+            (boundary_instance.as_str(), "Tray2", "Tray2"),
+        ] {
+            let options =
+                spool::printer_options_via_within(destination, &dir, command(&dir, &format!("InputSlot/Paper tray: *{current}")), LIMIT, "en");
+            assert_eq!(options.len(), 1, "{destination}: the queue's PPD must be read");
+            assert_eq!(options[0].default, expected, "{destination}: only valid instance choices override the PPD default");
+            assert_eq!(options[0].choices, [("Auto".into(), "Automatic".into()), ("Tray2".into(), "Tray 2".into())]);
+            assert_eq!(std::fs::read_to_string(dir.join("args")).unwrap(), format!("-p\n{destination}\n-l"));
+        }
+        let job = spool::Job { printer: Some("Office/duplex".into()), ..Default::default() };
+        assert_eq!(&spool::lp_args(&job)[..2], ["-d", "Office/duplex"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn invalid_destinations_are_rejected_before_running_lpoptions() {
+        let dir = folder();
+        let long_queue = "Q".repeat(65);
+        let long_queue_instance = format!("{long_queue}/duplex");
+        let long_instance = format!("Office/{}", "I".repeat(65));
+        for destination in [
+            "",
+            ".",
+            "..",
+            "/Office",
+            "Office/",
+            "Office/a/b",
+            "../../etc/passwd",
+            "./duplex",
+            "../duplex",
+            "Office/.",
+            "Office/..",
+            "Office\\duplex",
+            "Office/\\duplex",
+            "Office/with space",
+            "Office/line\nbreak",
+            "Office/quote\"",
+            "Office/equals=",
+            "Office/a:b",
+            "Office/\0",
+            long_queue.as_str(),
+            long_queue_instance.as_str(),
+            long_instance.as_str(),
+        ] {
+            assert!(
+                spool::printer_options_via_within(destination, &dir, command(&dir, "InputSlot: *Auto"), LIMIT, "en").is_empty(),
+                "{destination:?}"
+            );
+            assert!(!dir.join("args").exists(), "{destination:?}: rejected before spawning");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 #[test]
 fn a_scaled_appearance_is_not_scaled_twice() {
     let doc = fixture(1);
@@ -496,4 +683,260 @@ fn paper_matching_accepts_rounded_metric_sizes_but_not_custom_or_invalid_sizes()
     for size in [(0.0, 0.0), (-1728.0, 2592.0), (f64::INFINITY, 2592.0), (1728.0, f64::NAN), (1000.0, 1000.0)] {
         assert_eq!(matching_paper(size), None);
     }
+}
+
+#[test]
+fn us_number_10_envelope_is_offered_and_fed_by_name() {
+    // 4.125 × 9.5 in (#2734).
+    let index = matching_paper((684.0, 297.0)).unwrap();
+    assert_eq!(PAPERS[index].0, "US #10 Envelope (4.125 x 9.5 in)");
+    assert_eq!(PAPERS[index].1, (297.0, 684.0));
+    assert_eq!(cups_media(index), Some("Env10"));
+    let s = Settings { pages: vec![0], paper: PAPERS[index].1, layout: Layout::Size(SizeMode::Actual), ..Settings::default() };
+    assert_eq!(layout(&[(297.0, 684.0)], &s).unwrap()[0].size, (297.0, 684.0));
+}
+
+#[test]
+fn label_is_cut_turned_upright_and_fitted_without_distortion() {
+    let label = LABEL_PAPER;
+    assert_eq!(PAPERS[label].0, "4 x 6 in label (101.6 x 152.4 mm)");
+    assert_eq!(PAPERS[label].1, (288.0, 432.0));
+    assert_eq!(cups_media(label), Some("w288h432"));
+    // A sideways label in the lower half of an A4 sheet, text running bottom-to-top.
+    let rect = [40.0, 30.0, 560.0, 420.0];
+    for (text_up, flip, want_text_dir) in [(true, false, (1.0, 0.0)), (false, false, (1.0, 0.0)), (true, true, (-1.0, 0.0))] {
+        // Text direction on the page: up when text_up, down otherwise.
+        let page_dir = if text_up { (0.0, 1.0) } else { (0.0, -1.0) };
+        let s = Settings {
+            pages: vec![0],
+            paper: PAPERS[label].1,
+            layout: Layout::Label { flip },
+            crops: vec![Some(Crop { rect, text_up })],
+            ..Settings::default()
+        };
+        let sheets = layout(&[(595.0, 842.0)], &s).unwrap();
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].size, (288.0, 432.0));
+        let pl = sheets[0].placed[0];
+        assert_eq!(pl.clip, rect);
+        let [a, b, c, d, _, _] = pl.matrix.0;
+        // A pure quarter turn with one scale: no stretching.
+        assert!((a.hypot(b) - c.hypot(d)).abs() < 1e-9 && (a * c + b * d).abs() < 1e-9);
+        let dir = (a * page_dir.0 + c * page_dir.1, b * page_dir.0 + d * page_dir.1);
+        let n = dir.0.hypot(dir.1);
+        assert!((dir.0 / n - want_text_dir.0).abs() < 1e-9 && (dir.1 / n - want_text_dir.1).abs() < 1e-9, "text_up={text_up} flip={flip}");
+        let corners = [(rect[0], rect[1]), (rect[2], rect[1]), (rect[2], rect[3]), (rect[0], rect[3])].map(|(x, y)| pl.matrix.apply(x, y));
+        let (x0, x1) = corners.iter().fold((f64::MAX, f64::MIN), |m, p| (m.0.min(p.0), m.1.max(p.0)));
+        let (y0, y1) = corners.iter().fold((f64::MAX, f64::MIN), |m, p| (m.0.min(p.1), m.1.max(p.1)));
+        assert!(x0 >= LABEL_MARGIN - 1e-6 && x1 <= 288.0 - LABEL_MARGIN + 1e-6 && y0 >= LABEL_MARGIN - 1e-6 && y1 <= 432.0 - LABEL_MARGIN + 1e-6);
+        // Fills the label's width (the crop's height, 390 pt, becomes it).
+        assert!((x1 - x0 - (288.0 - 2.0 * LABEL_MARGIN)).abs() < 1e-6);
+    }
+    // No crop: the whole page, upright.
+    let whole =
+        layout(&[(200.0, 300.0)], &Settings { pages: vec![0], paper: (288.0, 432.0), layout: Layout::Label { flip: false }, ..Settings::default() })
+            .unwrap();
+    assert_eq!(whole[0].placed[0].clip, [0.0, 0.0, 200.0, 300.0]);
+    assert_eq!(whole[0].placed[0].matrix.0[1], 0.0);
+}
+
+#[test]
+fn text_direction_is_read_from_text_and_form_matrices() {
+    let doc = fixture(1);
+    assert!(!text_reads_up(&doc, 0), "upright text");
+    assert!(!text_reads_up(&doc, 9), "no such page");
+}
+
+#[test]
+fn imposed_pages_preserve_large_user_unit_matrices() {
+    let (unit, mode) = (75000.0, SizeMode::Fit);
+    let mut doc = fixture(1);
+    let page = pdfcraft_model::pages(&doc)[0].obj;
+    doc.update_dict(page, |d| d.set(b"UserUnit".to_vec(), Object::Real(unit))).unwrap();
+    let out = impose(&doc, &Settings { content: Content::Document, ..settings(vec![0], Layout::Size(mode)) }).unwrap();
+    let printed = Document::open(Arc::new(out)).unwrap();
+    let page = &pdfcraft_model::pages(&printed)[0];
+    let contents = printed.resolve(page.dict.get(b"Contents").unwrap());
+    let Object::Stream(stream) = &*contents else { panic!("sheet content") };
+    let bytes = stream.decoded().unwrap();
+    let parsed = pdfcraft_content::parse(&bytes);
+    assert_eq!(parsed.skipped, 0);
+    let cms: Vec<_> = parsed.ops.iter().filter(|op| op.is("cm")).collect();
+    assert_eq!(cms.len(), 2, "placement and source-to-display matrices");
+    let normalized = f64::from(unit as f32);
+    let scale = if mode == SizeMode::Actual { 1.0 } else { 756.0 / (300.0 * normalized) };
+    let expected = [
+        [scale, 0.0, 0.0, scale, 306.0 - 100.0 * normalized * scale, 396.0 - 150.0 * normalized * scale],
+        [normalized, 0.0, 0.0, normalized, 0.0, 0.0],
+    ];
+    for (cm, expected) in cms.iter().zip(expected) {
+        assert_eq!(cm.operands.len(), 6);
+        assert!(!bytes[cm.span.clone()].contains(&b'e') && !bytes[cm.span.clone()].contains(&b'E'));
+        for (actual, expected) in cm.nums::<6>().unwrap().into_iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1e-12 * expected.abs(), "unit={unit}: {actual} != {expected}");
+        }
+    }
+    let clip = parsed.ops.iter().find(|op| op.is("re")).unwrap();
+    assert_eq!(clip.operands.len(), 4);
+    let rect = clip.nums::<4>().unwrap();
+    assert_eq!(rect, [0.0, 0.0, 200.0 * normalized, 300.0 * normalized]);
+    assert!(rect[2] > 0.0 && rect[3] > 0.0, "the clip must retain the visible page");
+    let clip_tokens = std::str::from_utf8(&bytes[clip.span.clone()]).unwrap();
+    assert!(clip_tokens.split_whitespace().take(4).all(|token| !token.contains('e') && !token.contains('E')));
+    let apply = |m: [f64; 6], p: [f64; 2]| [m[0] * p[0] + m[2] * p[1] + m[4], m[1] * p[0] + m[3] * p[1] + m[5]];
+    let to_sheet = |p| apply(cms[0].nums::<6>().unwrap(), apply(cms[1].nums::<6>().unwrap(), p));
+    let mut anchors = vec![([100.0, 150.0], [306.0, 396.0])];
+    if mode == SizeMode::Fit {
+        anchors.extend([([0.0, 0.0], [54.0, 18.0]), ([200.0, 300.0], [558.0, 774.0])]);
+    }
+    for (raw, expected) in anchors {
+        for (actual, expected) in to_sheet(raw).into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-9, "unit={unit}: {actual} != {expected}");
+        }
+    }
+}
+
+/// `output_within` (#1818): the bounded wait every platform's `lpoptions` call goes through.
+#[cfg(not(target_arch = "wasm32"))]
+mod bounded_commands {
+    const MODE: &str = "PDFCRAFT_COMMAND_TEST_MODE";
+
+    /// The child process stands in for a command: it answers, or it never does.
+    #[test]
+    fn stand_in_for_a_command() {
+        match std::env::var(MODE).as_deref() {
+            Ok("answer") => println!("hello from the command"),
+            Ok("hang") => std::thread::sleep(std::time::Duration::from_secs(60)),
+            // Holds the output pipe it inherited for a while, as a daemon a command starts can.
+            Ok("linger") => std::thread::sleep(LINGER),
+            // Starts a lingering process on its own output, then exits or hangs itself.
+            Ok(mode @ ("orphan-exit" | "orphan-hang")) => {
+                let _ = command("linger").spawn();
+                println!("started");
+                if mode == "orphan-hang" {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    const LINGER: std::time::Duration = std::time::Duration::from_secs(8);
+
+    fn command(mode: &str) -> std::process::Command {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.args(["--exact", "tests::bounded_commands::stand_in_for_a_command", "--nocapture", "--"]).env(MODE, mode);
+        c
+    }
+
+    #[test]
+    fn a_command_that_answers_gives_its_output() {
+        let out = crate::spool::output_within(&mut command("answer"), std::time::Duration::from_secs(60)).unwrap();
+        assert!(String::from_utf8_lossy(&out).contains("hello from the command"));
+    }
+
+    #[test]
+    fn a_command_that_never_answers_is_stopped_at_the_deadline() {
+        let started = std::time::Instant::now();
+        let err = crate::spool::output_within(&mut command("hang"), std::time::Duration::from_millis(500)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "stopped soon after the deadline, not when the command gives up");
+    }
+
+    /// A process the command started keeps the output pipe open after the command has exited,
+    /// or after it was killed at the deadline: the wait still ends at the deadline (#2108
+    /// review), not when that process lets go of the pipe.
+    #[test]
+    fn a_process_left_holding_the_output_does_not_extend_the_wait() {
+        for mode in ["orphan-exit", "orphan-hang"] {
+            let started = std::time::Instant::now();
+            let err = crate::spool::output_within(&mut command(mode), std::time::Duration::from_millis(1500)).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{mode}");
+            assert!(started.elapsed() < LINGER / 2, "{mode}: returned after {:?}, when the lingering process let go", started.elapsed());
+        }
+    }
+}
+
+#[test]
+fn driver_options_take_the_ppds_own_names_in_the_ui_language() {
+    use crate::spool::{PrinterOption, localize, parse_ppd, ppd_text};
+    // Latin-1 elsewhere (the é), UTF-8 in the localization lines, as drivers ship them.
+    let mut ppd = b"*cupsLanguages: \"bg pt_BR\"\n*OpenGroup: Finishing/Finishing Options\n*OpenUI *KMDuplex/Print Type: PickOne\n*DefaultKMDuplex: Single\n*KMDuplex Single/1-Sided: \"\"\n*KMDuplex Double/2-Sided: \"\"\n*CloseUI: *KMDuplex\n*OpenUI *Staple/Staple: PickOne\n*DefaultStaple: None\n*Staple None/None: \"\"\n*CloseUI: *Staple\n*CloseGroup: Finishing\n*fr.Translation KMDuplex/Type d'impression r".to_vec();
+    ppd.push(0xE9);
+    ppd.extend_from_slice("el: \"\"\n*bg.Translation Finishing/Довършителни операции: \"\"\n*bg.Translation KMDuplex/Тип печат: \"\"\n*bg.KMDuplex Single/Едностранен: \"\"\n*bg.KMDuplex Double/: \"\"\n*pt_BR.Translation KMDuplex/Tipo de impressão: \"\"\n".as_bytes());
+    let parsed = parse_ppd(&ppd_text(&ppd));
+    let label = |o: &[PrinterOption], key: &str| o.iter().find(|o| o.key == key).map(|o| o.label.clone()).unwrap();
+    let mut bg = parsed.clone();
+    localize(&mut bg, &ppd, "bg");
+    let duplex = bg.iter().find(|o| o.key == "KMDuplex").unwrap();
+    assert_eq!((duplex.label.as_str(), duplex.group.as_str()), ("Тип печат", "Довършителни операции"));
+    assert_eq!(
+        duplex.choices,
+        [("Single".to_string(), "Едностранен".to_string()), ("Double".to_string(), "2-Sided".to_string())],
+        "an empty translation keeps the driver's name"
+    );
+    assert_eq!(label(&bg, "Staple"), "Staple", "untranslated options keep theirs");
+    // Region-specific codes, then the language alone; languages the PPD lacks change nothing.
+    let mut pt = parsed.clone();
+    localize(&mut pt, &ppd, "pt-br");
+    assert_eq!(label(&pt, "KMDuplex"), "Tipo de impressão");
+    for lang in ["en", "de", "", "bg-"] {
+        let mut other = parsed.clone();
+        localize(&mut other, &ppd, lang);
+        assert_eq!(other == parsed, lang != "bg-", "{lang:?}");
+    }
+}
+
+mod appearances;
+
+#[test]
+fn repeated_content_references_share_one_decode_budget() {
+    let mut doc = Document::new_empty();
+    let stream = doc.add(Stream::flate(Dict::new(), &vec![b' '; 1 << 20]));
+    let page: Dict = [(b"Contents".to_vec(), Object::Array(vec![Object::Ref(stream); 300]))].into_iter().collect();
+    let data = decoded_contents(&doc, &page, &mut DecodeBudget::page());
+    assert!(data.is_none_or(|d| d.len() <= pdfcraft_cos::MAX_PAGE_DECODED + 300));
+}
+
+/// 20 draws of a form that draws the next form 20 times, four levels down: 168,420 form
+/// entries from a few hundred bytes.
+fn form_fanout(doc: &mut Document) -> Dict {
+    let draws = "/X Do ".repeat(20);
+    let mut form = |content: &str, inner: Option<ObjRef>| {
+        let mut d: Dict = [(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect();
+        if let Some(inner) = inner {
+            let xobjects: Dict = [(b"X".to_vec(), Object::Ref(inner))].into_iter().collect();
+            let res: Dict = [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect();
+            d.set(b"Resources".to_vec(), Object::Dict(res));
+        }
+        doc.add(Stream::from_raw(d, content.as_bytes().to_vec()))
+    };
+    let mut inner = form("BT 0 1 -1 0 0 0 Tm (a) Tj ET", None);
+    for _ in 0..3 {
+        inner = form(&draws, Some(inner));
+    }
+    let xobjects: Dict = [(b"X".to_vec(), Object::Ref(inner))].into_iter().collect();
+    [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect()
+}
+
+#[test]
+fn text_direction_stops_at_the_form_budget() {
+    let mut doc = Document::new_empty();
+    let res = form_fanout(&mut doc);
+    let mut score = 0;
+    text_direction(&doc, "/X Do ".repeat(20).as_bytes(), &res, Matrix::IDENTITY, 0, &mut score, &mut DecodeBudget::page());
+    assert!(score > 0 && score <= pdfcraft_cos::MAX_PAGE_FORMS as i64, "score {score}");
+}
+
+/// A form refused by the spent budget is left out; the text drawn after it still counts.
+#[test]
+fn text_direction_reads_on_past_a_refused_form() {
+    let mut doc = Document::new_empty();
+    let form = doc.add(Stream::from_raw([(b"Subtype".to_vec(), Object::Name(b"Form".to_vec()))].into_iter().collect(), Vec::new()));
+    let xobjects: Dict = [(b"X".to_vec(), Object::Ref(form))].into_iter().collect();
+    let res: Dict = [(b"XObject".to_vec(), Object::Dict(xobjects))].into_iter().collect();
+    let mut score = 0;
+    let content = b"/X Do BT 0 1 -1 0 0 0 Tm (a) Tj ET";
+    text_direction(&doc, content, &res, Matrix::IDENTITY, 0, &mut score, &mut DecodeBudget::new(1 << 20, 0));
+    assert_eq!(score, 1);
 }

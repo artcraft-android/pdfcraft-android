@@ -187,6 +187,7 @@ fn invalid_geometry_is_rejected() {
         assert!(matches!(add_annotation(&mut doc, &new(0, s.clone()), &meta("x")), Err(AnnotError::Invalid(_))), "{s:?}");
     }
     assert_eq!(add_annotation(&mut doc, &new(5, Shape::Rectangle { rect: [0.0, 0.0, 10.0, 10.0] }), &meta("x")), Err(AnnotError::NoSuchPage(5)));
+    assert_eq!(AnnotError::NoSuchPage(5).to_string(), "page 6 does not exist", "the message counts pages from 1 (#1550)");
     assert!(!doc.is_modified(), "failed adds change nothing");
 }
 
@@ -588,6 +589,25 @@ fn links_are_added_edited_listed_and_removed() {
 }
 
 #[test]
+fn link_uri_is_percent_encoded_to_7_bit_ascii() {
+    use crate::links::{self, LinkAction, LinkStyle};
+    let mut doc = fixture();
+    for url in ["https://example.com/ação", "https://example.com/a%20b"] {
+        links::add(&mut doc, 0, [10.0, 10.0, 110.0, 30.0], &LinkAction::Uri(url.into()), &LinkStyle::default()).unwrap();
+    }
+    let doc = reopen(&doc);
+    let urls: Vec<String> = links::list(&doc)
+        .into_iter()
+        .filter_map(|link| match link.action {
+            LinkAction::Uri(url) => Some(url),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(urls, ["https://example.com/a%C3%A7%C3%A3o", "https://example.com/a%20b"]);
+    assert!(urls.iter().all(|url| url.is_ascii()));
+}
+
+#[test]
 fn link_edit_rejects_non_finite_and_overflowed_rectangles_without_mutating_the_pdf() {
     use crate::links::{self, LinkAction, LinkStyle};
     let mut doc = fixture();
@@ -783,7 +803,7 @@ fn replace_text_groups_a_strikeout_and_a_caret() {
     let quads = [[100.0, 720.0, 200.0, 720.0, 100.0, 706.0, 200.0, 706.0]];
     let red = Style { color: [0.89, 0.13, 0.13], opacity: 1.0, width: 1.0, fill: None };
     let blue = Style { color: [0.0, 0.47, 0.84], opacity: 1.0, width: 1.0, fill: None };
-    let i = add_text_replacement(&mut doc, 0, &quads, "new words", "Ada", &red, &blue, &meta("r")).unwrap();
+    let i = add_text_replacement(&mut doc, 0, &quads, "new words", "Ada", &red, &blue, &meta("r"), &meta("r-caret")).unwrap();
     let doc = reopen(&doc);
     let a = list(&doc, 0);
     let strike = &a[i];
@@ -791,13 +811,21 @@ fn replace_text_groups_a_strikeout_and_a_caret() {
     let caret = a.iter().find(|d| d.name(b"Subtype") == Some(b"Caret")).unwrap();
     assert_eq!((text(caret, b"Contents").as_str(), caret.name(b"RT")), ("new words", Some(&b"Group"[..])));
     assert!(caret.reference(b"IRT").is_some());
+    // #2666: the pair needs its own `/NM` each. XFDF names a reply by the `/NM` of what it
+    // replies to, so sharing one id writes `inreplyto` equal to the caret's own `name` and the
+    // pair does not survive an export and import.
+    assert_eq!(text(caret, b"NM").as_str(), "r-caret");
+    assert_eq!(text(strike, b"NM").as_str(), "r");
+    assert_ne!(text(caret, b"NM"), text(strike, b"NM"), "the caret must not carry the strikeout's name");
+    let irt = caret.reference(b"IRT").unwrap();
+    assert_eq!(text(doc.get(irt).as_dict().unwrap(), b"NM").as_str(), "r", "the caret replies to the strikeout");
     let r = rect(caret);
     assert!(r[0] < 200.0 && r[2] > 200.0 && r[1] < 706.0, "at the end of the line, below its baseline: {r:?}");
     // Deleting the strikeout takes the caret with it (the group).
     let mut doc = doc;
     delete_annotation(&mut doc, 0, i).unwrap();
     assert!(!list(&doc, 0).iter().any(|d| d.name(b"Subtype") == Some(b"Caret")));
-    assert!(add_text_replacement(&mut doc, 0, &[], "x", "Ada", &red, &blue, &meta("r")).is_err());
+    assert!(add_text_replacement(&mut doc, 0, &[], "x", "Ada", &red, &blue, &meta("r"), &meta("r-caret")).is_err());
 }
 
 #[test]
@@ -961,6 +989,29 @@ fn malformed_optional_interior_color_does_not_hide_shape_strokes() {
     let content = ap_content(&display, &rendered);
     assert!(content.contains("1 0 0 RG") && content.contains(" re\nS\n"), "the stroke remains drawable without a fill: {content}");
     assert!(list(&doc, 0)[0].get(b"AP").is_none(), "display generation leaves the source document unchanged");
+}
+
+/// #3175: viewers draw a note without an appearance as a fixed-size icon at the upper-left corner
+/// of its `/Rect`. The display copy must not stretch the icon over a large `/Rect` or shrink it
+/// to nothing in one with no width.
+#[test]
+fn a_note_without_an_appearance_is_shown_at_icon_size() {
+    let doc = document_of(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 600 600] >>",
+        b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 6 0 R] >>",
+        b"<< /Type /Annot /Subtype /Text /Rect [-23 240 480 468] /C [1 0 0] /Open true >>",
+        b"<< /Type /Annot /Subtype /Text /Rect [310 380 310 392] /Name /Comment /F 4 >>",
+        b"<< /Type /Annot /Subtype /FileAttachment /Rect [100 50 300 10] >>",
+    ]);
+    let display = with_missing_appearances(&doc).expect("the notes get a display appearance");
+    let rects = |doc: &Document| -> Vec<Vec<f64>> {
+        let rect = |d: &Dict| d.get(b"Rect").and_then(|r| r.as_array()).map(|a| a.iter().filter_map(Object::as_f64).collect::<Vec<f64>>());
+        list(doc, 0).iter().map(|d| rect(d).unwrap_or_default()).collect()
+    };
+    assert_eq!(rects(&display), [vec![-23.0, 448.0, -3.0, 468.0], vec![310.0, 372.0, 330.0, 392.0], vec![100.0, 30.0, 120.0, 50.0]]);
+    let original = [vec![-23.0, 240.0, 480.0, 468.0], vec![310.0, 380.0, 310.0, 392.0], vec![100.0, 50.0, 300.0, 10.0]];
+    assert_eq!(rects(&doc), original, "the source document is unchanged");
 }
 
 #[test]
@@ -1219,9 +1270,13 @@ fn comment_text_the_standard_fonts_cannot_draw_is_kept_and_marked() {
     on_page.push(Object::Ref(r));
     set_annots(&mut doc, page, on_page).unwrap();
     let k = list(&doc, 0).len() - 1;
-    let err = set_style(&mut doc, 0, k, Some([1.0, 0.0, 0.0]), None, None, None, &meta("")).unwrap_err();
+    let before = list(&doc, 0)[k].clone();
+    let err = set_style(&mut doc, 0, k, Some([1.0, 0.0, 0.0]), Some(0.4), Some(6.0), None, &meta("")).unwrap_err();
     assert!(matches!(&err, AnnotError::Undrawable(m) if m.contains("can't redraw") && m.contains("\"欢\" (U+6B22)")), "{err:?}");
-    assert_eq!(list(&doc, 0)[k].get(b"AP").and_then(|a| a.as_dict()).and_then(|a| a.reference(b"N")), Some(drawn), "its appearance is kept");
+    assert_eq!(list(&doc, 0)[k], before, "a refused restyle keeps the colour, opacity, width and appearance");
+    let err = set_rect(&mut doc, 0, k, [40.0, 40.0, 180.0, 90.0], &meta("")).unwrap_err();
+    assert!(matches!(&err, AnnotError::Undrawable(_)), "{err:?}");
+    assert_eq!(list(&doc, 0)[k], before, "a refused resize keeps the rectangle");
     // New text from the user is taken (and marked), as for any comment.
     set_contents(&mut doc, 0, k, "欢迎光临", &meta("")).unwrap();
     assert_eq!(mark(&doc, k), Some('欢'));
@@ -1318,4 +1373,303 @@ fn summaries_report_opacity_and_line_width() {
     let s = all.iter().find(|s| s.subtype == "Ink").expect("the ink comment is listed");
     assert!((s.opacity - 0.5).abs() < 1e-6, "{}", s.opacity);
     assert_eq!(s.width, Some(4.0));
+}
+
+/// A comment that `/Annots` lists many times, and that a second page lists too, is drawn once in
+/// the display copy. Every listing used to add another appearance stream, so a short array of
+/// repeated references multiplied the display bytes the engine writes on each refresh.
+#[test]
+fn a_comment_listed_many_times_is_drawn_once_for_display() {
+    let first = format!("<< /Type /Page /Parent 2 0 R /Annots [{}] >>", vec!["5 0 R"; 1_000].join(" "));
+    let doc = document_of(&[
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 /MediaBox [0 0 612 792] >>",
+        first.as_bytes(),
+        b"<< /Type /Page /Parent 2 0 R /Annots [5 0 R] >>",
+        b"<< /Type /Annot /Subtype /Square /Rect [10 10 50 50] /C [1 0 0] >>",
+    ]);
+    let mut cache = AppearanceCache::default();
+    let display = with_missing_appearances_cached(&doc, &mut cache).expect("the square needs an appearance");
+    assert_eq!(display.object_numbers().len(), doc.object_numbers().len() + 1, "one appearance stream, not one per listing");
+    assert_eq!((cache.builds(), cache.hits()), (1, 0));
+    assert!(list(&display, 0).iter().chain(&list(&display, 1)).all(|d| d.contains(b"AP")), "every listing shows it");
+    with_missing_appearances_cached(&doc, &mut cache).expect("a refresh");
+    assert_eq!((cache.builds(), cache.hits()), (1, 1), "a refresh reuses the cached stream once");
+}
+
+/// #1908: a text box's font size changes in `/DA` (colour kept), the rich text follows, the box
+/// grows to hold the bigger text but never shrinks, and bad sizes and other subtypes are refused.
+#[test]
+fn text_box_font_size_changes_the_da_and_grows_the_box() {
+    let mut doc = fixture();
+    let t = add_annotation(&mut doc, &new(0, Shape::TextBox { rect: [100.0, 680.0, 220.0, 692.0], font_size: 12.0 }), &meta("t")).unwrap();
+    set_style(&mut doc, 0, t, Some([1.0, 0.0, 0.0]), None, None, None, &meta("")).unwrap();
+    set_contents(&mut doc, 0, t, "one two three four five six seven eight nine ten eleven twelve", &meta("")).unwrap();
+    let height = |doc: &Document| {
+        let rect: Vec<f64> = list(doc, 0)[t].get(b"Rect").unwrap().as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        rect[3] - rect[1]
+    };
+    let before = height(&doc);
+    set_font_size(&mut doc, 0, t, 24.0, &meta("")).unwrap();
+    let doc = reopen(&doc);
+    let d = &list(&doc, 0)[t];
+    assert_eq!(text(d, b"DA"), "1 0 0 rg /Helv 24 Tf");
+    assert!(text(d, b"DS").contains("24pt") && text(d, b"RC").contains("font-size:24pt"));
+    assert_eq!(props(&doc, 0, t).unwrap().font_size, Some(24.0));
+    assert!(height(&doc) > before, "the box grows");
+    let mut doc = doc;
+    let grown = height(&doc);
+    set_font_size(&mut doc, 0, t, 6.0, &meta("")).unwrap();
+    assert!(height(&doc) >= grown, "the box never shrinks");
+    for bad in [0.0, 0.5, 401.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(set_font_size(&mut doc, 0, t, bad, &meta("")), Err(AnnotError::Invalid(_))), "{bad}");
+    }
+    assert_eq!(props(&doc, 0, t).unwrap().font_size, Some(6.0));
+    let note = add_annotation(&mut doc, &new(0, Shape::Note { at: [50.0, 50.0], icon: NoteIcon::Note }), &meta("t"));
+    if let Ok(i) = note {
+        assert!(set_font_size(&mut doc, 0, i, 12.0, &meta("")).is_err());
+        assert_eq!(props(&doc, 0, i).unwrap().font_size, None);
+    }
+}
+
+#[test]
+fn text_boxes_and_callouts_can_change_fill_and_border() {
+    let mut doc = fixture();
+    let shapes = [
+        Shape::TextBox { rect: [300.0, 600.0, 500.0, 660.0], font_size: 12.0 },
+        Shape::Callout {
+            rect: [300.0, 600.0, 500.0, 660.0],
+            knee: [260.0, 560.0],
+            point: [200.0, 520.0],
+            font_size: 12.0,
+            ending: LineEnding::OpenArrow,
+        },
+    ];
+    for shape in shapes {
+        let index = add_annotation(&mut doc, &new(0, shape), &meta("test")).unwrap();
+        assert!(props(&doc, 0, index).unwrap().fillable);
+        set_fill(&mut doc, 0, index, Some([1.0, 1.0, 1.0]), &meta("test")).unwrap();
+        set_style(&mut doc, 0, index, None, None, Some(3.0), None, &meta("test")).unwrap();
+        let saved = reopen(&doc);
+        let properties = props(&saved, 0, index).unwrap();
+        assert_eq!(properties.fill, Some([1.0; 3]));
+        assert_eq!(properties.width, Some(3.0));
+        let ap = ap_content(&saved, &list(&saved, 0)[index]);
+        assert!(ap.contains("1 1 1 rg") && ap.contains(" re f") && ap.contains("3 w"), "{ap}");
+        set_fill(&mut doc, 0, index, None, &meta("test")).unwrap();
+        assert_eq!(props(&doc, 0, index).unwrap().fill, None);
+    }
+}
+
+#[test]
+fn free_text_properties_show_legacy_or_absent_border_width() {
+    let mut doc = fixture();
+    let index = add_annotation(&mut doc, &new(0, Shape::TextBox { rect: [100.0, 100.0, 200.0, 140.0], font_size: 12.0 }), &meta("test")).unwrap();
+    let (_, reference) = annot_ref(&mut doc, 0, index).unwrap();
+    doc.update_dict(reference, |d| {
+        d.remove(b"BS");
+        d.remove(b"Border");
+    })
+    .unwrap();
+    assert_eq!(props(&doc, 0, index).unwrap().width, Some(0.0));
+    doc.update_dict(reference, |d| {
+        d.set(b"Border".to_vec(), Object::Array([0.0, 0.0, 4.0].into_iter().map(Object::Real).collect()));
+    })
+    .unwrap();
+    assert_eq!(props(&doc, 0, index).unwrap().width, Some(4.0));
+}
+
+/// A line's ends and the corners of connected lines and polygons can be moved after drawing:
+/// the points change, `/Rect` follows them (with room for an arrowhead), and the appearance is
+/// drawn anew. A line needs two ends far enough apart; a locked comment keeps its shape.
+#[test]
+fn lines_and_polygons_are_reshaped_by_their_points() {
+    let mut doc = fixture();
+    let l = add_annotation(
+        &mut doc,
+        &new(0, Shape::Line { from: [100.0, 100.0], to: [200.0, 100.0], start: LineEnding::None, end: LineEnding::OpenArrow }),
+        &meta("l"),
+    )
+    .unwrap();
+    let before = ap_content(&doc, &list(&doc, 0)[l]);
+    set_points(&mut doc, 0, l, &[[100.0, 100.0], [100.0, 300.0]], &meta("")).unwrap();
+    let doc2 = reopen(&doc);
+    let d = &list(&doc2, 0)[l];
+    let ends: Vec<f64> = d.get(b"L").unwrap().as_array().unwrap().iter().map(|o| o.as_f64().unwrap()).collect();
+    assert_eq!(ends, [100.0, 100.0, 100.0, 300.0]);
+    let r = rect(d);
+    assert!(r[0] < 100.0 && r[2] > 100.0 && r[1] < 100.0 && r[3] > 300.0, "the rectangle holds the line and its arrowhead: {r:?}");
+    assert!(r[2] - r[0] < 40.0, "and no more: {r:?}");
+    assert_ne!(ap_content(&doc2, d), before, "drawn anew");
+    assert_eq!(summaries(&doc2).into_iter().find(|s| s.index == l).unwrap().points, vec![[100.0, 100.0], [100.0, 300.0]]);
+    // Two ends exactly, far enough apart.
+    assert!(matches!(set_points(&mut doc, 0, l, &[[1.0, 1.0]], &meta("")), Err(AnnotError::Invalid(_))));
+    assert!(matches!(set_points(&mut doc, 0, l, &[[1.0, 1.0], [1.2, 1.0]], &meta("")), Err(AnnotError::Invalid(_))));
+    assert!(matches!(set_points(&mut doc, 0, l, &[[f64::NAN, 1.0], [10.0, 1.0]], &meta("")), Err(AnnotError::Invalid(_))));
+    // A polygon's corner.
+    let g = add_annotation(
+        &mut doc,
+        &new(0, Shape::Polygon { vertices: vec![[300.0, 300.0], [400.0, 300.0], [350.0, 380.0]], cloud: false }),
+        &meta("g"),
+    )
+    .unwrap();
+    set_points(&mut doc, 0, g, &[[300.0, 300.0], [450.0, 300.0], [350.0, 380.0], [300.0, 360.0]], &meta("")).unwrap();
+    let d = &list(&doc, 0)[g];
+    let v: Vec<f64> = d.get(b"Vertices").unwrap().as_array().unwrap().iter().map(|o| o.as_f64().unwrap()).collect();
+    assert_eq!(v.len(), 8);
+    assert!(rect(d)[2] > 450.0);
+    // Locked: refused, and nothing changes.
+    set_locked(&mut doc, 0, l, true).unwrap();
+    assert!(set_points(&mut doc, 0, l, &[[0.0, 0.0], [50.0, 50.0]], &meta("")).is_err());
+    // Other comments have no points to move.
+    let s = add_annotation(&mut doc, &new(0, Shape::Rectangle { rect: [10.0, 10.0, 50.0, 50.0] }), &meta("s")).unwrap();
+    assert!(matches!(set_points(&mut doc, 0, s, &[[0.0, 0.0], [50.0, 50.0]], &meta("")), Err(AnnotError::Invalid(_))));
+}
+
+#[test]
+fn page_walk_skips_repeated_and_cyclic_kids_without_queueing_them() {
+    let mut doc = fixture();
+    let root = ObjRef { num: 2, generation: 0 };
+    let (first, second) = (ObjRef { num: 3, generation: 0 }, ObjRef { num: 4, generation: 0 });
+    // A cycle back to the root, then both pages 128 times over.
+    let mut kids = vec![Object::Ref(root)];
+    kids.extend([Object::Ref(first), Object::Ref(second)].into_iter().cycle().take(256));
+    doc.update_dict(root, |d| d.set(b"Kids".to_vec(), Object::Array(kids))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    assert_eq!(walk.next(), Some(first));
+    assert!(walk.pending.len() <= 2, "repeated kids retained {} pending entries", walk.pending.len());
+    assert_eq!(walk.next(), Some(second));
+    assert_eq!(walk.next(), None);
+    assert_eq!(page_refs(&doc).unwrap(), [first, second]);
+}
+
+/// #1786: TrueType glyph contours (such as Inter's composite Ђ and ћ) overlap with the same
+/// winding direction where strokes cross, so typed signature appearances must fill with the
+/// non-zero winding operator (`f`), not even-odd (`f*`).
+#[test]
+fn typed_signature_uses_nonzero_winding_fill() {
+    let mut doc = fixture();
+    let contours = vec![vec![[0.4, 0.0], [0.6, 0.0], [0.6, 1.0], [0.4, 1.0]], vec![[0.0, 0.7], [1.0, 0.7], [1.0, 0.85], [0.0, 0.85]]];
+    let idx = add_annotation(&mut doc, &new(0, Shape::TypedSignature { rect: [100.0, 100.0, 200.0, 140.0], contours }), &meta("sig")).unwrap();
+    let ap = ap_content(&doc, &list(&doc, 0)[idx]);
+    assert!(ap.ends_with("h\nf\n"), "expected non-zero winding fill (`f`), got: {ap}");
+    assert!(!ap.contains("f*"), "must not use even-odd fill (`f*`): {ap}");
+}
+
+/// Many page tree nodes sharing one `/Kids` array read it once, not once per node.
+#[test]
+fn page_walk_reads_a_shared_kids_array_once() {
+    let mut doc = fixture();
+    let root = ObjRef { num: 2, generation: 0 };
+    let (first, second) = (ObjRef { num: 3, generation: 0 }, ObjRef { num: 4, generation: 0 });
+    let shared = doc.add(Object::Array([Object::Ref(first), Object::Ref(second)].into_iter().cycle().take(2_000).collect()));
+    let nodes: Vec<Object> = (0..1_000)
+        .map(|_| {
+            let mut d = Dict::new();
+            d.set(b"Type".to_vec(), Object::name("Pages"));
+            d.set(b"Kids".to_vec(), Object::Ref(shared));
+            Object::Ref(doc.add(d))
+        })
+        .collect();
+    doc.update_dict(root, |d| d.set(b"Kids".to_vec(), Object::Array(nodes))).unwrap();
+    let mut walk = PageWalk::new(&doc, root);
+    let pages: Vec<ObjRef> = walk.by_ref().collect();
+    assert_eq!(pages, [first, second]);
+    assert!(walk.examined <= 10_000, "{} kids entries read", walk.examined);
+}
+
+/// Adding many links to a page extends its `/Annots` once, not once per link.
+#[test]
+fn many_links_extend_a_page_annotation_list_once() {
+    let mut doc = fixture();
+    let before = annots(&doc, page_refs(&doc).unwrap()[0]).len();
+    let n = 2_000;
+    let rects: Vec<[f64; 4]> = (0..n).map(|i| [10.0, i as f64 * 0.1, 50.0, i as f64 * 0.1 + 5.0]).collect();
+    ANNOTS_ENTRIES_COPIED.with(|c| c.set(0));
+    let added = links::add_many(&mut doc, &[(0, rects, "https://example.com".into())], &links::LinkStyle::default()).unwrap();
+    let copied = ANNOTS_ENTRIES_COPIED.with(std::cell::Cell::get);
+    assert_eq!(added, n);
+    assert_eq!(annots(&doc, page_refs(&doc).unwrap()[0]).len(), before + n);
+    assert!(copied <= 4 * n, "{copied} annotation entries copied for {n} links");
+}
+
+/// A batch with one bad entry adds nothing: no link objects are left behind unattached.
+#[test]
+fn a_link_batch_with_a_bad_entry_creates_no_objects() {
+    let mut doc = fixture();
+    let page = page_refs(&doc).unwrap()[0];
+    let before = (annots(&doc, page).len(), doc.scan_objects().count());
+    let good = [10.0, 10.0, 50.0, 20.0];
+    let style = links::LinkStyle::default();
+    for bad in [
+        vec![(0, vec![good], "https://example.com".to_string()), (0, vec![good, [f64::NAN, 0.0, 10.0, 10.0]], "https://example.com".into())],
+        vec![(0, vec![good], "https://example.com".to_string()), (0, vec![good], "  ".into())],
+        vec![(0, vec![good], "https://example.com".to_string()), (99, vec![good], "https://example.com".into())],
+    ] {
+        assert!(links::add_many(&mut doc, &bad, &style).is_err());
+        assert_eq!((annots(&doc, page).len(), doc.scan_objects().count()), before);
+    }
+}
+
+fn doc_of(objs: &[String]) -> Document {
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objs.len() + 1).as_bytes());
+    Document::open(Arc::new(out)).expect("opens")
+}
+
+#[test]
+fn link_listing_skips_repeated_refs_and_caps_web_address_text() {
+    // One link referenced 1000 times, and 300 small links sharing one 64 KiB address.
+    let annots = format!("{}{}", " 4 0 R".repeat(1000), "<< /Subtype /Link /Rect [0 0 1 1] /A 5 0 R >>".repeat(300));
+    let doc = doc_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>"),
+        "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /A 5 0 R >>".into(),
+        "<< /S /URI /URI 6 0 R >>".into(),
+        format!("({})", "u".repeat(64 << 10)),
+    ]);
+    let all = links::list(&doc);
+    assert_eq!(all.iter().filter(|l| l.obj == Some(ObjRef::new(4, 0))).count(), 1);
+    assert_eq!(all.len(), 301, "every distinct link is still listed");
+    let kept: usize = all.iter().map(|l| if let links::LinkAction::Uri(u) = &l.action { u.len() } else { 0 }).sum();
+    assert!(kept <= links::MAX_URI_BYTES, "{kept} bytes of web addresses kept");
+    assert!(matches!(&all[0].action, links::LinkAction::Uri(u) if u.len() == 64 << 10));
+}
+
+#[test]
+fn web_address_cap_counts_the_text_kept_after_conversion() {
+    // 200 links sharing a 64 KiB address of invalid UTF-8: 12.5 MiB of bytes, each byte kept as a
+    // three-byte replacement character.
+    let annots = "<< /Subtype /Link /Rect [0 0 1 1] /A 4 0 R >>".repeat(200);
+    let doc = doc_of(&[
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>".into(),
+        format!("<< /Type /Page /Parent 2 0 R /Annots [{annots}] >>"),
+        "<< /S /URI /URI 5 0 R >>".into(),
+        format!("<{}>", "FF".repeat(64 << 10)),
+    ]);
+    let all = links::list(&doc);
+    assert_eq!(all.len(), 200);
+    let kept: usize = all.iter().map(|l| if let links::LinkAction::Uri(u) = &l.action { u.len() } else { 0 }).sum();
+    assert!(kept <= links::MAX_URI_BYTES, "{kept} bytes of web addresses kept");
+    assert!(kept > 0);
+}
+
+#[test]
+fn cloud_outline_has_a_bump_budget() {
+    // 50 long edges would each ask for 10,000 bumps of radius 1.
+    let pts: Vec<(f64, f64)> = (0..50).map(|i| (f64::from(i) * std::f64::consts::TAU / 50.0).sin_cos()).map(|(s, c)| (1e7 * c, 1e7 * s)).collect();
+    let bumps = appearance::cloud_path(&pts, 1.0).lines().filter(|l| l.ends_with(" c")).count();
+    assert!((pts.len()..=appearance::MAX_CLOUD_BUMPS + 2 * pts.len()).contains(&bumps), "{bumps} bumps");
 }

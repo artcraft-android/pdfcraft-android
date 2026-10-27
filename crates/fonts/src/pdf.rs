@@ -1,14 +1,20 @@
 //! What content editing and redaction need from a PDF font: how to split a string into character
 //! codes, each code's advance width, the glyph height (ascent, descent), and what each code means
 //! (Unicode) — and back, which text the font can show. Widths come from the font dictionary
-//! (`/Widths`, `/W`, `/DW`, `/MissingWidth`); the standard 14 fonts without widths use
-//! approximations. Meanings come from `/ToUnicode`, else the encoding (`/Encoding` base and
-//! `/Differences` glyph names, ISO 32000-2 Annex D).
+//! (`/Widths`, `/W`, `/DW`, `/MissingWidth`); a simple font with no `/Widths` uses its embedded
+//! sfnt program's advances, else the exact published standard-14 metrics ([`crate::Std14`]).
+//!
+//! Meanings come from `/ToUnicode`, else the encoding (`/Encoding` base and `/Differences` glyph
+//! names, ISO 32000-2 Annex D). A code may deliberately have **no** meaning: where the font's own
+//! built-in encoding governs and we hold no table for it — Symbol, ZapfDingbats, MacExpert — this
+//! module reports nothing rather than the Latin letter at that code. Callers must treat a missing
+//! meaning as "unknown", never as "absent": `redact` matches on this map, and a wrong character
+//! there is worse than no character.
 
 use std::borrow::Cow;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
-use pdfcraft_cos::{Dict, Document, Object};
+use pdfcraft_cos::{DecodeBudget, Dict, Document, Object};
 
 /// How the bytes of a string map to codes.
 #[derive(Clone, Debug, PartialEq)]
@@ -20,14 +26,6 @@ enum Codes {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum Std14 {
-    Helvetica,
-    Times,
-    Courier,
-    Symbolic,
-}
-
-#[derive(Clone, Debug, PartialEq)]
 pub struct Metrics {
     codes: Codes,
     /// Simple fonts: `/FirstChar` and `/Widths`.
@@ -35,11 +33,15 @@ pub struct Metrics {
     widths: Vec<f64>,
     /// Composite fonts: CID → width, and CID ranges with one width.
     cid_widths: HashMap<u32, f64>,
-    cid_ranges: Vec<(u32, u32, f64)>,
+    cid_ranges: Spans<f64>,
     /// Code → CID for embedded non-identity CMaps (`cidrange` / `cidchar`).
-    cid_map: Vec<(u32, u32, u32)>,
+    cid_map: Spans<u32>,
     default: f64,
-    std14: Option<Std14>,
+    /// Composite fonts with an explicit `/DW`: `/W` may leave out the glyphs that have that
+    /// width (Chrome and Skia do), so a CID missing from `/W` is not a missing glyph.
+    explicit_default: bool,
+    /// The standard-14 face to measure with when the dictionary carries no `/Widths`.
+    std14: Option<crate::Std14>,
     /// Glyph units → text space (0.001, or `/FontMatrix[0]` for Type 3).
     pub scale: f64,
     /// Glyph box in text space per unit of font size.
@@ -55,10 +57,16 @@ pub struct Metrics {
     /// font name and, when present, `/FontDescriptor` flags/weight/angle.
     pub bold: bool,
     pub italic: bool,
+    /// Whether this font draws Indic text in visual order (pre-base vowel signs before their
+    /// consonant): a known legacy Indic font whose Unicode mapping is Indic. See [`legacy_indic_font`].
+    pub visual_order: bool,
     /// Bytes per code for writing new text (1 for simple fonts, else the codespace length).
     code_len: usize,
     /// Valid single-character explicit mappings, preindexed once for large full CJK fonts.
     explicit_reverse: HashMap<char, u32>,
+    /// Subset CIDFontType2 only: one bit per CID (below 65 536) whose glyph has an outline in the
+    /// embedded program. See [`cids_with_outlines`].
+    outlined_cids: Vec<u64>,
 }
 
 fn nums(doc: &Document, o: Option<&Object>) -> Vec<f64> {
@@ -71,9 +79,28 @@ fn dict(doc: &Document, o: Option<&Object>) -> Option<Dict> {
     o.and_then(|o| doc.resolve(o).as_dict().cloned())
 }
 
+/// Whether `base_font` (subset tag allowed) names a legacy Indic font family that is laid out in
+/// visual order (Kruti Dev, DevLys, Chanakya, Shusha, Shivaji, Walkman, Akruti, APS-DV, DV-TT…).
+fn legacy_indic_font(base_font: &str) -> bool {
+    let name =
+        base_font.split_once('+').filter(|(tag, _)| tag.len() == 6 && tag.bytes().all(|b| b.is_ascii_uppercase())).map_or(base_font, |(_, n)| n);
+    let name = name.to_ascii_lowercase();
+    ["kruti", "devlys", "chanakya", "shusha", "shivaji", "walkman", "akruti"].iter().any(|n| name.contains(n))
+        || ["aps-", "dv-"].iter().any(|p| name.starts_with(p))
+}
+
 /// A source PDF's sfnt program for an in-memory editor. Never a bundled font or an export
 /// fallback. Type 1/Type 3 programs cannot be consumed by an sfnt text renderer.
 pub fn embedded_sfnt(doc: &Document, font: &Dict) -> Option<Vec<u8>> {
+    embedded_sfnt_within(doc, font, &mut DecodeBudget::new(2 * MAX_SFNT, 0))
+}
+
+/// The largest embedded sfnt program read for the editor.
+const MAX_SFNT: usize = 16 << 20;
+
+/// [`embedded_sfnt`], decoding against `budget`, which an enumeration of a page's fonts shares:
+/// each program decoded is charged whether or not it turns out to be usable.
+pub fn embedded_sfnt_within(doc: &Document, font: &Dict, budget: &mut DecodeBudget) -> Option<Vec<u8>> {
     use skrifa::{MetadataProvider as _, raw::TableProvider as _};
     let descendant = dict(doc, font.get(b"DescendantFonts").and_then(|o| doc.resolve(o).as_array().and_then(|a| a.first()).cloned()).as_ref());
     let descriptor = dict(doc, descendant.as_ref().unwrap_or(font).get(b"FontDescriptor"))?;
@@ -81,7 +108,7 @@ pub fn embedded_sfnt(doc: &Document, font: &Dict) -> Option<Vec<u8>> {
         let Some(object) = descriptor.get(key) else { continue };
         let object = doc.resolve(object);
         let Object::Stream(stream) = object.as_ref() else { continue };
-        let Ok(mut bytes) = stream.decoded_within(16 << 20) else { continue };
+        let Ok(mut bytes) = budget.decode_within(stream, MAX_SFNT) else { continue };
         let Ok(face) = skrifa::FontRef::from_index(&bytes, 0) else { continue };
         if face.metrics(skrifa::instance::Size::unscaled(), skrifa::instance::LocationRef::default()).units_per_em == 0 {
             continue;
@@ -115,6 +142,76 @@ pub fn embedded_sfnt(doc: &Document, font: &Dict) -> Option<Vec<u8>> {
         }
     }
     None
+}
+
+/// The CIDs (below 65 536) of a Type 0 font over an embedded TrueType program whose glyph has
+/// outline data, through `/CIDToGIDMap`; empty when the program or the map can't be read.
+/// Subsetters keep glyph ids and empty the glyphs they drop, so an empty glyph is a missing one.
+fn cids_with_outlines(doc: &Document, font: &Dict) -> Vec<u64> {
+    use skrifa::raw::TableProvider as _;
+    let Some(descendant) = dict(doc, font.get(b"DescendantFonts").and_then(|o| doc.resolve(o).as_array().and_then(|a| a.first()).cloned()).as_ref())
+    else {
+        return Vec::new();
+    };
+    let Some(program) = dict(doc, descendant.get(b"FontDescriptor")).and_then(|d| d.get(b"FontFile2").cloned()) else { return Vec::new() };
+    let program = doc.resolve(&program);
+    let Object::Stream(stream) = program.as_ref() else { return Vec::new() };
+    let Ok(bytes) = stream.decoded_within(16 << 20) else { return Vec::new() };
+    let Some(loca) = skrifa::FontRef::from_index(&bytes, 0).ok().and_then(|face| face.loca(None).ok()) else { return Vec::new() };
+    let outlined = |gid: u32| loca.get_raw(gid as usize).zip(loca.get_raw(gid as usize + 1)).is_some_and(|(start, end)| end > start);
+    match descendant.get(b"CIDToGIDMap").map(|o| doc.resolve(o)).as_deref() {
+        None | Some(Object::Name(_)) => bit_set_below_64k((0..loca.len().min(0x1_0000) as u32).filter(|&gid| outlined(gid))),
+        Some(Object::Stream(map)) => {
+            let Ok(map) = map.decoded_within(1 << 17) else { return Vec::new() };
+            bit_set_below_64k(
+                map.as_chunks::<2>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, gid)| outlined(u32::from(u16::from_be_bytes(**gid))))
+                    .map(|(cid, _)| cid as u32),
+            )
+        }
+        Some(_) => Vec::new(),
+    }
+}
+
+/// A simple font with no `/Widths` is drawn (and found by text search) with its embedded
+/// program's own advances, so measure with them too; a standard-14 guess from the name can be
+/// wider and leave the end of a line outside a redaction mark (#2130). The glyph is looked up
+/// the way the renderer does: the encoding's character in the Unicode cmap, else the code itself
+/// (as in a symbolic cmap), else `.notdef`. Only sfnt programs are read; others keep the guess.
+fn embedded_widths(doc: &Document, font: &Dict, m: &mut Metrics) {
+    use skrifa::instance::{LocationRef, Size};
+    use skrifa::{GlyphId, MetadataProvider as _, raw::TableProvider as _};
+    let Some(descriptor) = dict(doc, font.get(b"FontDescriptor")) else { return };
+    for key in [b"FontFile2".as_slice(), b"FontFile3".as_slice()] {
+        let Some(object) = descriptor.get(key) else { continue };
+        let object = doc.resolve(object);
+        let Object::Stream(stream) = object.as_ref() else { continue };
+        let Ok(bytes) = stream.decoded_within(16 << 20) else { continue };
+        let Ok(face) = skrifa::FontRef::from_index(&bytes, 0) else { continue };
+        let upem = f64::from(face.metrics(Size::unscaled(), LocationRef::default()).units_per_em);
+        if upem == 0.0 {
+            continue;
+        }
+        let advances = face.glyph_metrics(Size::unscaled(), LocationRef::default());
+        let (charmap, cmap) = (face.charmap(), face.cmap().ok());
+        let found = |g: Option<GlyphId>| g.filter(|g| *g != GlyphId::NOTDEF);
+        m.widths = (0..=255u32)
+            .map(|code| {
+                let glyph = found(m.unicode.encoding.get(&code).and_then(|t| only_char(t)).and_then(|c| charmap.map(c)))
+                    .or_else(|| [0, 0xF000, 0xF100, 0xF200].into_iter().find_map(|o| found(cmap.as_ref()?.map_codepoint(code + o))));
+                // A subset holds only the glyphs it draws: 0 keeps `has_glyph` false for the rest.
+                match glyph {
+                    None if m.subset => 0.0,
+                    _ => advances.advance_width(glyph.unwrap_or(GlyphId::NOTDEF)).map_or(0.0, |w| f64::from(w) * 1000.0 / upem),
+                }
+            })
+            .collect();
+        m.first = 0;
+        return;
+    }
 }
 
 /// Replace an existing cmap directory entry with a bounded Unicode format-12 table.
@@ -187,6 +284,9 @@ const MAX_CMAP_ENTRIES: usize = 1 << 20;
 /// Most codespace or CID ranges kept from a CMap; Adobe's largest published CMaps have a few
 /// thousand.
 const MAX_CMAP_RANGES: usize = 1 << 16;
+/// Largest decoded Encoding or ToUnicode CMap stream read; real CMaps stay well under it, and a larger
+/// one is not decoded at all.
+const MAX_CMAP_BYTES: usize = 16 << 20;
 
 /// Code → Unicode of a font. Explicit mappings and sequential ranges are kept as declared, so a range
 /// costs one record however many codes it covers; where two overlap, the one declared later wins.
@@ -510,10 +610,11 @@ impl Metrics {
             first: 0,
             widths: Vec::new(),
             cid_widths: HashMap::new(),
-            cid_ranges: Vec::new(),
-            cid_map: Vec::new(),
+            cid_ranges: Spans::default(),
+            cid_map: Spans::default(),
             default: 500.0,
-            std14: Some(Std14::Helvetica),
+            explicit_default: false,
+            std14: Some(crate::Std14::Helvetica),
             scale: 0.001,
             ascent: 0.9,
             descent: -0.25,
@@ -523,8 +624,10 @@ impl Metrics {
             subset: false,
             bold: false,
             italic: false,
+            visual_order: false,
             code_len: 1,
             explicit_reverse: (32..127u8).map(|c| (char::from(c), u32::from(c))).collect(),
+            outlined_cids: Vec::new(),
         }
     }
 
@@ -545,12 +648,18 @@ impl Metrics {
         m.bold |= bold;
         m.italic |= italic;
         m.base_font = base;
+        if m.composite && m.subset {
+            m.outlined_cids = cids_with_outlines(doc, font);
+        }
         m.code_len = match &m.codes {
             Codes::One => 1,
             Codes::Two => 2,
             Codes::Ranges(r) => r.last().map_or(2, |x| x.0),
         };
         m.unicode = unicode_map(doc, font, m.composite);
+        if m.std14.is_some() {
+            embedded_widths(doc, font, &mut m);
+        }
         let mut reverse = HashMap::new();
         for (&code, text) in m.unicode.explicit.iter().map(|(c, (_, t))| (c, t)).chain(m.unicode.encoding.iter()) {
             if let Some(ch) = only_char(text)
@@ -560,6 +669,14 @@ impl Metrics {
             }
         }
         m.explicit_reverse = reverse;
+        // Only a font known to be laid out in visual order counts: a missing GSUB proves nothing
+        // (bare CFF and subset fonts often drop it), and the font program is never decoded here.
+        if legacy_indic_font(&m.base_font) {
+            let indic = |c: char| matches!(u32::from(c), 0x0900..=0x0D7F);
+            m.visual_order = m.unicode.explicit.values().any(|(_, t)| t.chars().any(indic))
+                || m.unicode.encoding.values().any(|t| t.chars().any(indic))
+                || m.unicode.ranges.iter().any(|r| r.units.iter().any(|&u| matches!(u, 0x0900..=0x0D7F)));
+        }
         m
     }
 
@@ -574,13 +691,13 @@ impl Metrics {
             m.codes = Codes::Two;
             if let Some(e) = font.get(b"Encoding").map(|e| doc.resolve(e))
                 && let Object::Stream(s) = &*e
-                && let Ok(data) = s.decoded()
+                && let Ok(data) = s.decoded_within(MAX_CMAP_BYTES)
             {
                 let (spaces, cids) = parse_cmap(&data);
                 if !spaces.is_empty() {
                     m.codes = Codes::Ranges(spaces);
                 }
-                m.cid_map = cids;
+                m.cid_map = Spans::new(cids);
             }
             let desc = font
                 .get(b"DescendantFonts")
@@ -590,29 +707,36 @@ impl Metrics {
                 .unwrap_or_default();
             if let Some(dw) = desc.get(b"DW").and_then(|d| doc.resolve(d).as_f64()) {
                 m.default = dw;
+                m.explicit_default = true;
             }
             if let Some(w) = desc.get(b"W").map(|w| doc.resolve(w)).and_then(|w| w.as_array().cloned()) {
+                let mut ranges = Vec::new();
                 let mut i = 0;
                 while i < w.len() {
                     let Some(c0) = doc.resolve(&w[i]).as_f64().map(|v| v as u32) else { break };
                     match w.get(i + 1).map(|o| doc.resolve(o)) {
                         Some(a) if a.as_array().is_some() => {
                             for (k, x) in a.as_array().into_iter().flatten().enumerate() {
+                                // A run past the last CID ends there: wrapping would give CID 0 its width.
+                                let Some(cid) = u32::try_from(k).ok().and_then(|k| c0.checked_add(k)) else { break };
                                 if let Some(v) = doc.resolve(x).as_f64() {
-                                    m.cid_widths.insert(c0 + k as u32, v);
+                                    m.cid_widths.insert(cid, v);
                                 }
                             }
                             i += 2;
                         }
                         Some(c1) => {
-                            if let (Some(c1), Some(v)) = (c1.as_f64(), w.get(i + 2).and_then(|x| doc.resolve(x).as_f64())) {
-                                m.cid_ranges.push((c0, c1 as u32, v));
+                            if let (Some(c1), Some(v)) = (c1.as_f64(), w.get(i + 2).and_then(|x| doc.resolve(x).as_f64()))
+                                && ranges.len() < MAX_CMAP_ENTRIES
+                            {
+                                ranges.push((c0, c1 as u32, v));
                             }
                             i += 3;
                         }
                         None => break,
                     }
                 }
+                m.cid_ranges = Spans::new(ranges);
             }
             descriptor = dict(doc, desc.get(b"FontDescriptor"));
         } else {
@@ -631,16 +755,10 @@ impl Metrics {
                     }
                 }
             } else if m.widths.is_empty() {
-                let base = String::from_utf8_lossy(font.name(b"BaseFont").unwrap_or(b"")).to_ascii_lowercase();
-                m.std14 = Some(if base.contains("courier") {
-                    Std14::Courier
-                } else if base.contains("times") {
-                    Std14::Times
-                } else if base.contains("symbol") || base.contains("dingbats") {
-                    Std14::Symbolic
-                } else {
-                    Std14::Helvetica
-                });
+                let base = String::from_utf8_lossy(font.name(b"BaseFont").unwrap_or(b"")).into_owned();
+                // The real face, bold and italic included: the published metrics differ by style,
+                // so Times-Bold is not Times-Roman and neither is Helvetica scaled.
+                m.std14 = crate::Std14::from_base_font(&base).or(Some(crate::Std14::Helvetica));
             }
         }
         if let Some(d) = descriptor {
@@ -689,29 +807,39 @@ impl Metrics {
         if self.cid_map.is_empty() {
             return code;
         }
-        self.cid_map.iter().find(|(lo, hi, _)| code >= *lo && code <= *hi).map_or(0, |(lo, _, c)| c.saturating_add(code - lo))
+        self.cid_map.find(code).map_or(0, |(lo, _, c)| c.saturating_add(code.saturating_sub(*lo)))
     }
 
     /// The advance of `code` in text space per unit of font size.
     pub fn width(&self, code: u32) -> f64 {
         if self.composite {
             let cid = self.cid(code);
-            let w = self.cid_widths.get(&cid).copied().or_else(|| self.cid_ranges.iter().find(|(a, b, _)| cid >= *a && cid <= *b).map(|r| r.2));
+            let w = self.cid_widths.get(&cid).copied().or_else(|| self.cid_ranges.find(cid).map(|r| r.2));
             return w.unwrap_or(self.default) * self.scale;
         }
         if let Some(w) = code.checked_sub(self.first).and_then(|i| self.widths.get(i as usize)) {
             return w * self.scale;
         }
-        match &self.std14 {
-            Some(Std14::Courier) => 0.6,
-            Some(Std14::Symbolic) => 0.75,
-            Some(f) => {
-                let c = char::from_u32(code).filter(|c| !c.is_control()).unwrap_or('n');
-                let w = crate::helvetica_width(&c.to_string(), 1.0);
-                if *f == Std14::Times { w * 0.92 } else { w }
-            }
+        match self.std14 {
+            // A font with no /Widths is one of the standard 14; use its published metrics.
+            // Codes the font's encoding leaves undefined fall back to /MissingWidth.
+            Some(f) => match u8::try_from(self.std14_code(f, code)).map(|c| f.width(c)).unwrap_or(0.0) {
+                0.0 => self.default * self.scale,
+                w => w / 1000.0,
+            },
             None => self.default * self.scale,
         }
+    }
+
+    /// Where the standard-14 table, indexed by WinAnsi, holds the glyph `code` draws in this font:
+    /// its encoding (base and `/Differences`) names the glyph, so a remapped code is measured as
+    /// the glyph it now shows (#2894). Symbol and ZapfDingbats are indexed by their own encodings,
+    /// and a glyph WinAnsi has no code for keeps the code itself.
+    fn std14_code(&self, face: crate::Std14, code: u32) -> u32 {
+        if matches!(face, crate::Std14::Symbol | crate::Std14::ZapfDingbats) {
+            return code;
+        }
+        self.unicode.encoding.get(&code).and_then(|t| only_char(t)).and_then(crate::win_ansi_byte).map_or(code, u32::from)
     }
 
     /// Word spacing applies to the single-byte code 32 (§9.3.3).
@@ -733,10 +861,25 @@ impl Metrics {
     }
 
     /// Whether the font has a glyph for `code` (subset fonts lack the glyphs they don't use).
+    /// Only asked for codes the font's Unicode mapping gives: a subset's `ToUnicode` lists the
+    /// glyphs it kept, while its `/W` leaves out those of the default width (#1443).
     fn has_glyph(&self, code: u32) -> bool {
         if self.composite {
             let cid = self.cid(code);
-            return self.cid_widths.contains_key(&cid) || self.cid_ranges.iter().any(|(a, b, _)| cid >= *a && cid <= *b) || !self.subset;
+            // CID 0 is `.notdef` (an unmapped code lands there too), whatever ToUnicode says: Word
+            // maps it to a space and gives it a width, and typing with it draws boxes (#3223).
+            if cid == 0 {
+                return false;
+            }
+            // A CID /W leaves out takes /DW, and Skia (Chrome) leaves out every CID of that width: for
+            // those, only the subset's program says whether the glyph is there.
+            return self.cid_widths.contains_key(&cid)
+                || self.cid_ranges.find(cid).is_some()
+                || !self.subset
+                || self.outlined_cids.get(cid as usize / 64).is_some_and(|w| (*w >> (cid % 64)) & 1 == 1)
+                // No readable TrueType program to ask (e.g. CFF or missing): an explicit /DW
+                // still says /W may leave out glyphs of that width (#1443).
+                || (self.outlined_cids.is_empty() && self.explicit_default);
         }
         match code.checked_sub(self.first).and_then(|i| self.widths.get(i as usize)) {
             Some(w) => *w > 0.0 || code == 32,
@@ -778,9 +921,13 @@ impl Metrics {
     }
 }
 
-/// The UTF-16 code units of CMap hex bytes.
+/// Most UTF-16 units kept from one ToUnicode destination: the CMap format allows destinations of up
+/// to 512 bytes, and every glyph a sequential range covers builds its text from the whole of one.
+const MAX_DESTINATION_UNITS: usize = 256;
+
+/// The UTF-16 code units of CMap hex bytes, at most [`MAX_DESTINATION_UNITS`] of them.
 fn code_units(b: &[u8]) -> Vec<u16> {
-    b.chunks(2).map(|c| u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)])).collect()
+    b.chunks(2).take(MAX_DESTINATION_UNITS).map(|c| u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)])).collect()
 }
 
 /// UTF-16BE (with surrogates) from CMap hex bytes.
@@ -827,16 +974,69 @@ fn add_range(out: &mut Unicode, budget: &mut usize, seq: &mut u32, lo: u32, hi: 
     true
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Code span records read by CID and width lookups, for the tests that keep a lookup logarithmic.
+    static SPAN_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts one span record read (tests only).
+#[inline]
+fn count_span_reads() {
+    #[cfg(test)]
+    SPAN_READS.with(|c| c.set(c.get().saturating_add(1)));
+}
+
+/// Code spans `(lo, hi, value)` in declaration order, where the first-declared span covering a code
+/// wins, indexed so that a lookup is one binary search.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Spans<T> {
+    spans: Vec<(u32, u32, T)>,
+    /// The span covering each stretch of codes; see [`stretches`].
+    cover: Vec<(u64, Option<usize>)>,
+}
+
+impl<T> Spans<T> {
+    fn new(spans: Vec<(u32, u32, T)>) -> Self {
+        let bounds: Vec<(u32, u32)> = spans.iter().map(|s| (s.0, s.1)).collect();
+        Spans { cover: stretches(&bounds, false), spans }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.spans.is_empty()
+    }
+
+    /// The first-declared span covering `code`.
+    fn find(&self, code: u32) -> Option<&(u32, u32, T)> {
+        let step = self.cover.partition_point(|&(start, _)| {
+            count_span_reads();
+            start <= u64::from(code)
+        });
+        let &(_, record) = self.cover.get(step.checked_sub(1)?)?;
+        self.spans.get(record?)
+    }
+}
+
 /// For each stretch of codes, from its first code on, the latest-declared range covering it (`None`
 /// where no range does), sorted by code; a lookup is one binary search over it.
 fn cover_index(ranges: &[BfRange]) -> Vec<(u64, Option<usize>)> {
+    let spans: Vec<(u32, u32)> = ranges.iter().map(|r| (r.lo, r.hi)).collect();
+    stretches(&spans, true)
+}
+
+/// For each stretch of codes, from its first code on, the span `(lo, hi)` covering it (`None` where
+/// none does), sorted by code: the latest-declared one when `later_wins`, else the first-declared.
+/// At most `u32::MAX` spans are indexed.
+fn stretches(spans: &[(u32, u32)], later_wins: bool) -> Vec<(u64, Option<usize>)> {
+    // Heap keys, largest for the winning record; the mapping is its own inverse.
+    let key = |record: u32| if later_wins { record } else { !record };
     // Openings (first code, record) and closings (one past the last code), each in code order. The cover
     // can only change at one of their codes, so the sweep visits those codes in order.
-    let mut opens: Vec<(u32, u32)> = ranges.iter().enumerate().map(|(i, r)| (r.lo, i as u32)).collect();
+    let mut opens: Vec<(u32, u32)> = spans.iter().zip(0..u32::MAX).map(|(&(lo, _), i)| (lo, i)).collect();
     opens.sort_unstable();
-    let mut closes: Vec<u64> = ranges.iter().map(|r| u64::from(r.hi) + 1).collect();
+    let mut closes: Vec<u64> = spans.iter().take(opens.len()).map(|&(_, hi)| u64::from(hi) + 1).collect();
     closes.sort_unstable();
-    // Records that have opened and not yet closed; the top is the latest declared one.
+    // Keys of the records that have opened and not yet closed; the top is the winning one.
     let mut open: BinaryHeap<u32> = BinaryHeap::new();
     let mut cover: Vec<(u64, Option<usize>)> = Vec::new();
     let (mut next_open, mut next_close) = (0, 0);
@@ -850,16 +1050,16 @@ fn cover_index(ranges: &[BfRange]) -> Vec<(u64, Option<usize>)> {
         while let Some(&(lo, record)) = opens.get(next_open)
             && u64::from(lo) <= p
         {
-            open.push(record);
+            open.push(key(record));
             next_open += 1;
         }
         while closes.get(next_close).is_some_and(|&end| end <= p) {
             next_close += 1;
         }
-        while open.peek().is_some_and(|&top| ranges.get(top as usize).is_none_or(|r| u64::from(r.hi) < p)) {
+        while open.peek().is_some_and(|&top| spans.get(key(top) as usize).is_none_or(|&(_, hi)| u64::from(hi) < p)) {
             open.pop();
         }
-        let winner = open.peek().map(|&top| top as usize);
+        let winner = open.peek().map(|&top| key(top) as usize);
         if cover.last().map(|&(_, w)| w) != Some(winner) {
             cover.push((p, winner));
         }
@@ -982,16 +1182,53 @@ fn parse_to_unicode_within(data: &[u8], out: &mut Unicode, mut budget: usize) {
     out.explicit_low = bit_set_below_64k(out.explicit.keys().copied());
 }
 
-/// A glyph name's Unicode (Annex D names, `uniXXXX`, `uXXXX[XX]`, single letters).
-pub fn glyph_unicode(name: &str) -> Option<char> {
-    if let Ok(i) = crate::encodings::NAMES.binary_search_by(|(n, _)| (*n).cmp(name)) {
-        return char::from_u32(crate::encodings::NAMES[i].1);
+/// A glyph name's text, by the Adobe Glyph List *algorithm* — the published naming rules, not
+/// the AGL data table, which this crate does not hold.
+///
+/// A name is cut at its first `.`, because a suffix marks a variant of the same character rather
+/// than a different one (`a.sc` is small-capital `a`, `one.oldstyle` is still `1`). What remains
+/// is split on `_` into components, so a ligature name yields several characters (`f_i` is "fi").
+/// Each component is read as an Annex D name, as `uniXXXX` with one or more four-hex-digit values,
+/// or as `uXXXX` through `uXXXXXX`.
+///
+/// Returns `None` rather than a partial answer: a name is either fully understood or not, and half
+/// a ligature would be worse than admitting we cannot read it.
+pub fn glyph_text(name: &str) -> Option<String> {
+    let stem = name.split('.').next().filter(|s| !s.is_empty())?;
+    let mut out = String::new();
+    for part in stem.split('_') {
+        out.push_str(&glyph_component(part)?);
     }
-    let hex = name.strip_prefix("uni").filter(|h| h.len() == 4).or_else(|| name.strip_prefix('u').filter(|h| (4..=6).contains(&h.len())))?;
-    u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+    Some(out).filter(|s| !s.is_empty())
 }
 
-/// Code → Unicode for a font: its ToUnicode CMap, else (simple fonts) its encoding.
+/// One `_`-separated component of a glyph name.
+fn glyph_component(part: &str) -> Option<String> {
+    if let Ok(i) = crate::encodings::NAMES.binary_search_by(|(n, _)| (*n).cmp(part)) {
+        return char::from_u32(crate::encodings::NAMES[i].1).map(String::from);
+    }
+    // `from_str_radix` accepts a leading `+`, which is not a glyph name, so the digits are checked.
+    let hexish = |h: &str| !h.is_empty() && h.bytes().all(|b| b.is_ascii_hexdigit());
+    if let Some(hex) = part.strip_prefix("uni").filter(|h| h.len() >= 4 && h.len() % 4 == 0 && hexish(h)) {
+        let mut s = String::new();
+        for i in (0..hex.len()).step_by(4) {
+            // A lone surrogate half is not a character; such a name is not usable text.
+            s.push(char::from_u32(u32::from_str_radix(hex.get(i..i.saturating_add(4))?, 16).ok()?)?);
+        }
+        return Some(s);
+    }
+    let hex = part.strip_prefix('u').filter(|h| (4..=6).contains(&h.len()) && hexish(h))?;
+    u32::from_str_radix(hex, 16).ok().and_then(char::from_u32).map(String::from)
+}
+
+/// [`glyph_text`] for names that stand for exactly one character.
+pub fn glyph_unicode(name: &str) -> Option<char> {
+    let mut chars = glyph_text(name)?.chars().collect::<Vec<_>>().into_iter();
+    chars.next().filter(|_| chars.len() == 0)
+}
+
+/// Code → Unicode for a font: its ToUnicode CMap (for a composite font, also the name
+/// `/Identity-H` or `/Identity-V`, read as code = Unicode), else (simple fonts) its encoding.
 fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
     let mut out = Unicode::default();
     if !composite {
@@ -1001,12 +1238,33 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
             Some(Object::Dict(d)) => d.name(b"BaseEncoding").map(<[u8]>::to_vec),
             _ => None,
         };
-        let table: &[u32; 256] = match base_name.as_deref() {
-            Some(b"WinAnsiEncoding") => &crate::encodings::WIN_ANSI,
-            Some(b"MacRomanEncoding") => &crate::encodings::MAC_ROMAN,
-            _ => &crate::encodings::STANDARD,
+        // Symbol and ZapfDingbats carry their own built-in encodings, which are not Latin
+        // (ISO 32000-2 9.6.6.1): Symbol code 0x61 is `alpha`, not `a`. We do not hold those two
+        // tables, so with no base encoding named they get no implicit mapping at all. Reporting
+        // nothing is honest; reporting Latin letters silently corrupts text extraction, find,
+        // copy and — because `redact` matches on this map — redaction.
+        //
+        // Deliberately keyed on the *name*, not on the `/FontDescriptor` symbolic flag. A great
+        // many ordinary Latin TrueType subsets set that flag and still rely on a Latin encoding,
+        // so suppressing on the flag would lose real text on a large share of real documents.
+        // An explicitly named base encoding is a deliberate statement and is always honoured,
+        // even on Symbol.
+        let symbolic_builtin = matches!(
+            font.name(b"BaseFont").map(|b| crate::Std14::from_base_font(&String::from_utf8_lossy(b))),
+            Some(Some(crate::Std14::Symbol | crate::Std14::ZapfDingbats))
+        );
+        let table: Option<&[u32; 256]> = match base_name.as_deref() {
+            Some(b"WinAnsiEncoding") => Some(&crate::encodings::WIN_ANSI),
+            Some(b"MacRomanEncoding") => Some(&crate::encodings::MAC_ROMAN),
+            Some(b"StandardEncoding") => Some(&crate::encodings::STANDARD),
+            // MacExpert is small caps, oldstyle figures and fractions, not Latin at these codes,
+            // and we hold no table for it either.
+            Some(b"MacExpertEncoding") => None,
+            _ if symbolic_builtin => None,
+            // Standard is the default for a simple font that names no base encoding.
+            _ => Some(&crate::encodings::STANDARD),
         };
-        for (code, u) in table.iter().enumerate() {
+        for (code, u) in table.into_iter().flatten().enumerate() {
             if let Some(c) = char::from_u32(*u).filter(|_| *u != 0) {
                 out.encoding.insert(code as u32, c.to_string());
             }
@@ -1020,8 +1278,10 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
                     // Out-of-range codes map nothing a simple font can show.
                     Object::Int(n) => code = u32::try_from((*n).max(0)).unwrap_or(u32::MAX),
                     Object::Name(n) => {
-                        match glyph_unicode(&String::from_utf8_lossy(n)) {
-                            Some(c) => out.encoding.insert(code, c.to_string()),
+                        // A name we cannot read removes any inherited meaning for that code,
+                        // rather than leaving the base encoding's letter standing in for it.
+                        match glyph_text(&String::from_utf8_lossy(n)) {
+                            Some(t) => out.encoding.insert(code, t),
                             None => out.encoding.remove(&code),
                         };
                         code = code.saturating_add(1);
@@ -1031,12 +1291,42 @@ fn unicode_map(doc: &Document, font: &Dict, composite: bool) -> Unicode {
             }
         }
     }
-    if let Some(Object::Stream(s)) = font.get(b"ToUnicode").map(|t| doc.resolve(t)).as_deref()
-        && let Ok(data) = s.decoded()
-    {
-        parse_to_unicode(&data, &mut out);
+    match font.get(b"ToUnicode").map(|t| doc.resolve(t)).as_deref() {
+        Some(Object::Stream(s)) => {
+            if let Ok(data) = s.decoded_within(MAX_CMAP_BYTES) {
+                parse_to_unicode(&data, &mut out);
+            }
+        }
+        // `/ToUnicode /Identity-H` is not a stream, as ISO 32000-2 §9.10.3 requires, but CAD
+        // exporters (WSCAD among them) write it for composite fonts whose two-byte codes are the
+        // UTF-16 code units. Acrobat shows them as code = Unicode, and so does the renderer's
+        // text layer; without it the text could be seen but not edited or found. The same rule
+        // (code = Unicode, no controls or lone surrogates) is in the vendored renderer,
+        // `Type0Font::char_code_to_unicode` in vendor/hayro-interpret/src/font/cid.rs: keep both alike.
+        Some(Object::Name(n)) if composite && matches!(n.as_slice(), b"Identity-H" | b"Identity-V") => {
+            parse_to_unicode(&identity_to_unicode(), &mut out);
+        }
+        _ => {}
     }
     out
+}
+
+/// A ToUnicode CMap mapping each two-byte code to the same UTF-16 code unit, leaving out the
+/// surrogates (which are not characters on their own) and the controls (C0, DEL and C1, as the
+/// renderer's text layer does). No range crosses a last-byte boundary (§9.10.3).
+fn identity_to_unicode() -> Vec<u8> {
+    let mut ranges = vec![(0x20u32, 0x7Eu32), (0xA0, 0xFF)];
+    ranges.extend((0x01u32..=0xFF).filter(|h| !(0xD8..=0xDF).contains(h)).map(|h| (h << 8, (h << 8) | 0xFF)));
+    let mut cmap = String::from("1 begincodespacerange <0000> <FFFF> endcodespacerange\n");
+    // At most 100 entries per section (§9.7.5.2 limits for CMap files).
+    for chunk in ranges.chunks(100) {
+        cmap.push_str(&format!("{} beginbfrange\n", chunk.len()));
+        for (lo, hi) in chunk {
+            cmap.push_str(&format!("<{lo:04X}> <{hi:04X}> <{lo:04X}>\n"));
+        }
+        cmap.push_str("endbfrange\n");
+    }
+    cmap.into_bytes()
 }
 
 #[cfg(test)]
@@ -1044,6 +1334,88 @@ mod tests {
     use pdfcraft_cos::{Dict, Document, Object, Stream};
 
     use super::*;
+
+    /// Span records read while `f` runs.
+    fn span_reads(f: impl FnOnce()) -> usize {
+        SPAN_READS.with(|c| c.set(0));
+        f();
+        SPAN_READS.with(|c| c.get())
+    }
+
+    /// A composite font with `encoding` as its CMap, `w` as its widths and `to_unicode`.
+    fn composite(doc: &mut Document, encoding: &str, w: Vec<Object>, to_unicode: &str) -> Dict {
+        let mut desc = Dict::new();
+        desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+        desc.set(b"W".to_vec(), Object::Array(w));
+        let enc = Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), encoding.as_bytes()))));
+        let tu = Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), to_unicode.as_bytes()))));
+        font(
+            doc,
+            vec![
+                ("Subtype", Object::name("Type0")),
+                ("Encoding", enc),
+                ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                ("ToUnicode", tu),
+            ],
+        )
+    }
+
+    /// Many `/W` ranges that leave a code out cost a glyph of it a binary search, not a scan of them all.
+    #[test]
+    fn widths_of_a_code_no_range_covers_take_few_steps() {
+        let mut doc = Document::new_empty();
+        let w: Vec<Object> = (1..=10_000i64).flat_map(|k| [Object::Int(2 * k), Object::Int(2 * k), Object::Int(500)]).collect();
+        let f = composite(&mut doc, "", w, "");
+        let m = Metrics::from_dict(&doc, &f);
+        assert_eq!(m.width(4), 0.5);
+        let reads = span_reads(|| {
+            for _ in 0..1000 {
+                assert_eq!(m.width(3), 1.0);
+            }
+        });
+        assert!(reads <= 1000 * 64, "{reads} span reads");
+    }
+
+    /// Where spans overlap, the first-declared one wins, as a scan in declaration order finds it.
+    #[test]
+    fn overlapping_spans_resolve_to_the_first_declared() {
+        let spans = Spans::new(vec![(0, 10, 'a'), (5, 20, 'b'), (3, 3, 'c'), (30, 25, 'd'), (u32::MAX, u32::MAX, 'e')]);
+        let found = |code| spans.find(code).map(|s| s.2);
+        let want = [(0, Some('a')), (3, Some('a')), (10, Some('a')), (11, Some('b')), (20, Some('b')), (21, None), (27, None), (u32::MAX, Some('e'))];
+        for (code, value) in want {
+            assert_eq!(found(code), value, "code {code}");
+        }
+    }
+
+    /// Checking the glyph of every explicit ToUnicode entry looks its code up once in the CID map.
+    #[test]
+    fn many_unicode_entries_look_up_their_cids_in_few_steps() {
+        let n = 2000;
+        let cidchars: String = (0..n).map(|k| format!("<{:04X}> {} ", 0x8000 + k, k + 1)).collect();
+        let encoding = format!("1 begincodespacerange <0000> <FFFF> endcodespacerange {n} begincidchar {cidchars} endcidchar");
+        let bfchars: String = (0..n).map(|k| format!("<{:04X}> <{:04X}> ", 0x1000 + k, 0x4E00 + k)).collect();
+        let to_unicode = format!("{n} beginbfchar {bfchars} endbfchar");
+        let mut doc = Document::new_empty();
+        let f = composite(&mut doc, &encoding, Vec::new(), &to_unicode);
+        let reads = span_reads(|| {
+            Metrics::from_dict(&doc, &f);
+        });
+        assert!(reads <= n * 64, "{reads} span reads");
+    }
+
+    /// Every glyph of a sequential range builds its text from the destination, so a long one is cut
+    /// to the CMap limit once, when it is read.
+    #[test]
+    fn unicode_destinations_are_cut_to_the_cmap_limit() {
+        let long = "0041".repeat(4096);
+        let cmap = format!("2 beginbfrange <0010> <0020> <{long}> <0030> <0030> [<{long}>] endbfrange 1 beginbfchar <0040> <{long}> endbfchar");
+        let mut u = Unicode::default();
+        parse_to_unicode(cmap.as_bytes(), &mut u);
+        for code in [0x10, 0x20, 0x30, 0x40] {
+            let text = u.text(code).unwrap_or_default();
+            assert!(!text.is_empty() && text.len() <= MAX_DESTINATION_UNITS * 3, "code {code:#x}: {} bytes", text.len());
+        }
+    }
 
     /// A font whose ranges cover a few low codes keeps tables that size, not a fixed 64k-entry one.
     #[test]
@@ -1087,6 +1459,37 @@ mod tests {
         let broken = font(&mut doc, vec![("FontDescriptor", Object::Dict(descriptor))]);
         assert!(embedded_sfnt(&doc, &broken).is_none());
         assert!(embedded_sfnt(&doc, &Dict::new()).is_none());
+    }
+
+    /// #2130: with no `/Widths`, an embedded program's advances win over a guess from the name
+    /// ("Mono" would mean Courier, 600 units for every glyph).
+    #[test]
+    fn a_font_without_widths_measures_with_its_embedded_program() {
+        use pdfcraft_cos::Stream;
+        use skrifa::MetadataProvider as _;
+        let mut doc = Document::new_empty();
+        let bytes = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+        let face = skrifa::FontRef::new(bytes).unwrap();
+        let (size, location) = (skrifa::instance::Size::unscaled(), skrifa::instance::LocationRef::default());
+        let upem = f64::from(face.metrics(size, location).units_per_em);
+        let advance = |c: char| f64::from(face.glyph_metrics(size, location).advance_width(face.charmap().map(c).unwrap()).unwrap()) / upem;
+        let program = doc.add(Object::Stream(Stream::flate(Dict::new(), bytes)));
+        let mut descriptor = Dict::new();
+        descriptor.set(b"FontFile2".to_vec(), Object::Ref(program));
+        let f = font(
+            &mut doc,
+            vec![
+                ("Subtype", Object::name("TrueType")),
+                ("BaseFont", Object::name("HouseMono")),
+                ("Encoding", Object::name("WinAnsiEncoding")),
+                ("FontDescriptor", Object::Dict(descriptor)),
+            ],
+        );
+        let m = Metrics::from_dict(&doc, &f);
+        for c in ['i', 'l', 'W', ' '] {
+            assert!((m.width(u32::from(c)) - advance(c)).abs() < 1e-9, "{c}: {} vs {}", m.width(u32::from(c)), advance(c));
+        }
+        assert!(m.width(u32::from('i')) < 0.4, "not Courier's 0.6");
     }
 
     #[test]
@@ -1196,6 +1599,37 @@ mod tests {
         assert_eq!(m.encode("Ω").as_deref(), Some(&b"B"[..]));
     }
 
+    /// A standard-14 font with no `/Widths` is measured by the glyph each code draws, not by the
+    /// glyph WinAnsi gives that code (#2894); `/Widths`, when present, still go by code.
+    #[test]
+    fn standard_fonts_without_widths_measure_the_glyph_their_differences_name() {
+        let mut doc = Document::new_empty();
+        let mut enc = Dict::new();
+        enc.set(b"BaseEncoding".to_vec(), Object::name("WinAnsiEncoding"));
+        let diffs =
+            vec![Object::Int(65), Object::name("W"), Object::Int(87), Object::name("A"), Object::name("uni03A9"), Object::name("not.a.glyph")];
+        enc.set(b"Differences".to_vec(), Object::Array(diffs));
+        let f = font(
+            &mut doc,
+            vec![("Subtype", Object::name("Type1")), ("BaseFont", Object::name("Helvetica")), ("Encoding", Object::Dict(enc.clone()))],
+        );
+        let m = Metrics::from_dict(&doc, &f);
+        assert_eq!((m.width(65), m.width(87)), (0.944, 0.667), "A and W swap their widths");
+        // Omega has no WinAnsi code and the last name reads as nothing: both keep their code's width.
+        assert_eq!((m.width(88), m.width(89)), (0.667, 0.667));
+        let f = font(
+            &mut doc,
+            vec![
+                ("Subtype", Object::name("Type1")),
+                ("BaseFont", Object::name("Helvetica")),
+                ("FirstChar", Object::Int(87)),
+                ("Widths", Object::Array(vec![Object::Int(500)])),
+                ("Encoding", Object::Dict(enc)),
+            ],
+        );
+        assert_eq!(Metrics::from_dict(&doc, &f).width(87), 0.5, "/Widths go by code");
+    }
+
     #[test]
     fn subset_fonts_only_encode_the_glyphs_they_have() {
         let mut doc = Document::new_empty();
@@ -1215,6 +1649,38 @@ mod tests {
         assert!(m.subset);
         assert_eq!(m.encode("ab").as_deref(), Some(&b"ab"[..]));
         assert_eq!(m.encode("abc"), None);
+    }
+
+    #[test]
+    fn cmap_streams_decode_within_a_size_cap() {
+        // A valid CMap padded past the cap (a small Flate stream of whitespace) is not decoded whole.
+        let to_unicode = b"1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfrange <0024> <0026> <0041> endbfrange";
+        let encoding = b"1 begincodespacerange <0000> <FFFF> endcodespacerange 1 begincidrange <0000> <FFFF> 0 endcidrange";
+        for padded in [false, true] {
+            let mut doc = Document::new_empty();
+            let mut stream = |cmap: &[u8]| {
+                let mut data = cmap.to_vec();
+                if padded {
+                    data.resize(MAX_CMAP_BYTES + 1, b' ');
+                }
+                Object::Ref(doc.add(Object::Stream(Stream::flate(Dict::new(), &data))))
+            };
+            let (tu, enc) = (stream(to_unicode), stream(encoding));
+            let mut desc = Dict::new();
+            desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+            let f = font(
+                &mut doc,
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("Encoding", enc),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                    ("ToUnicode", tu),
+                ],
+            );
+            let m = Metrics::from_dict(&doc, &f);
+            assert_eq!(m.decode(&[0, 0x24]) == "A", !padded, "ToUnicode, padded: {padded}");
+            assert_eq!(matches!(m.codes, Codes::Ranges(_)), !padded, "Encoding, padded: {padded}");
+        }
     }
 
     #[test]
@@ -1253,6 +1719,136 @@ mod tests {
         assert_eq!(m.decode(&[0, 0x24, 0, 0x25, 0, 3, 0, 0x30, 0, 0x31, 0, 0x10]), "AB Hié");
         assert_eq!(m.encode("Hi A").as_deref(), Some(&[0, 0x30, 0, 0x31, 0, 3, 0, 0x24][..]));
         assert_eq!(m.encode("Z"), None);
+    }
+
+    /// Word's Type 0 subsets map CID 0 as well as the real space glyph to U+0020 and give CID 0 a
+    /// width; CID 0 is `.notdef`, so a typed space takes the real one (#3223).
+    #[test]
+    fn composite_fonts_never_encode_with_cid_0() {
+        let mut doc = Document::new_empty();
+        let cmap = b"/CIDInit /ProcSet findresource begin 1 begincodespacerange <0000> <FFFF> endcodespacerange \
+            1 beginbfrange <0000> <0002> [<0020> <004D> <00E1>] endbfrange \
+            1 beginbfrange <0005> <0007> [<0065> <0072> <0020>] endbfrange end";
+        let tu = doc.add(Object::Stream(Stream::from_raw(Dict::new(), cmap.to_vec())));
+        let mut desc = Dict::new();
+        desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+        let widths = [889, 444, 389, 278, 444, 333, 250].map(Object::Int).to_vec();
+        desc.set(b"W".to_vec(), Object::Array(vec![Object::Int(0), Object::Array(vec![Object::Int(778)]), Object::Int(1), Object::Array(widths)]));
+        let f = font(
+            &mut doc,
+            vec![
+                ("Subtype", Object::name("Type0")),
+                ("BaseFont", Object::name("BCDEEE+TimesNewRomanPSMT")),
+                ("Encoding", Object::name("Identity-H")),
+                ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                ("ToUnicode", Object::Ref(tu)),
+            ],
+        );
+        let m = Metrics::from_dict(&doc, &f);
+        assert_eq!(m.encode("Me er").as_deref(), Some(&[0, 1, 0, 5, 0, 7, 0, 5, 0, 6][..]));
+        assert_eq!(m.decode(&[0, 1, 0, 7, 0, 2]), "M á");
+    }
+
+    /// WSCAD writes `/ToUnicode /Identity-H` (a name, not a CMap stream) on composite fonts whose
+    /// codes are UTF-16 code units: the codes read as the same Unicode, as in Acrobat. Controls
+    /// and lone surrogates map to nothing, and a simple font's name is not a ToUnicode map.
+    #[test]
+    fn identity_to_unicode_names_read_codes_as_unicode() {
+        let doc = Document::new_empty();
+        for name in ["Identity-H", "Identity-V"] {
+            let f = font(
+                &mut Document::new_empty(),
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("BaseFont", Object::name("RobotoMono-Regular")),
+                    ("Encoding", Object::name("Identity-H")),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(Dict::new())])),
+                    ("ToUnicode", Object::name(name)),
+                ],
+            );
+            let m = Metrics::from_dict(&doc, &f);
+            assert_eq!(m.decode(&[0, b'Z', 0, 0xFC, 0, b'r', 0x20, 0xAC, 0x4E, 0x2D]), "Zür€中", "{name}");
+            assert_eq!(m.text_of(0x0001), None);
+            assert_eq!(m.text_of(0x007F), None, "DEL is a control");
+            assert_eq!(m.text_of(0x0085), None, "a C1 control");
+            assert_eq!(m.text_of(0x00A0).as_deref(), Some("\u{A0}"), "the range resumes after C1");
+            assert_eq!(m.text_of(0x007E).as_deref(), Some("~"));
+            assert_eq!(m.text_of(0xD800), None);
+            assert_eq!(m.text_of(0xFFFD).as_deref(), Some("\u{FFFD}"));
+        }
+        let simple = font(
+            &mut Document::new_empty(),
+            vec![("Subtype", Object::name("TrueType")), ("BaseFont", Object::name("Arial")), ("ToUnicode", Object::name("Identity-H"))],
+        );
+        let m = Metrics::from_dict(&doc, &simple);
+        assert_eq!(m.text_of(0x41).as_deref(), Some("A"), "the encoding still applies");
+    }
+
+    /// Chrome's subsets leave the glyphs of `/DW` width out of `/W` (#1443): "s" (CID 0x56) is
+    /// still in the font, but nothing is when the font gives no default width to point at.
+    #[test]
+    fn composite_subset_glyphs_of_the_default_width_are_present() {
+        let metrics = |dw: bool| {
+            let mut doc = Document::new_empty();
+            let cmap = b"/CIDInit /ProcSet findresource begin 1 begincodespacerange <0000> <FFFF> endcodespacerange \
+                1 beginbfrange <0055> <0057> <0072> endbfrange end";
+            let tu = doc.add(Object::Stream(Stream::from_raw(Dict::new(), cmap.to_vec())));
+            let mut desc = Dict::new();
+            desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+            if dw {
+                desc.set(b"DW".to_vec(), Object::Int(500));
+            }
+            desc.set(
+                b"W".to_vec(),
+                Object::Array(vec![
+                    Object::Int(0x55),
+                    Object::Array(vec![Object::Int(333)]),
+                    Object::Int(0x57),
+                    Object::Array(vec![Object::Int(277)]),
+                ]),
+            );
+            let f = font(
+                &mut doc,
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("BaseFont", Object::name("AAAAAA+LiberationSans")),
+                    ("Encoding", Object::name("Identity-H")),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                    ("ToUnicode", Object::Ref(tu)),
+                ],
+            );
+            Metrics::from_dict(&doc, &f)
+        };
+        let chrome = metrics(true);
+        assert_eq!(chrome.encode("rst").as_deref(), Some(&[0, 0x55, 0, 0x56, 0, 0x57][..]));
+        assert_eq!(chrome.width(0x56), 0.5);
+        assert_eq!(chrome.encode("x"), None, "a character the ToUnicode map doesn't give");
+        assert_eq!(metrics(false).encode("s"), None);
+    }
+
+    /// A `/W` run that starts at the last CID stops there instead of overflowing onto CID 0.
+    #[test]
+    fn composite_width_run_past_the_last_cid_is_dropped() {
+        let widths = |first: i64| {
+            let mut doc = Document::new_empty();
+            let mut desc = Dict::new();
+            desc.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+            desc.set(b"DW".to_vec(), Object::Int(1000));
+            desc.set(b"W".to_vec(), Object::Array(vec![Object::Int(first), Object::Array(vec![Object::Int(100), Object::Int(200)])]));
+            let f = font(
+                &mut doc,
+                vec![
+                    ("Subtype", Object::name("Type0")),
+                    ("Encoding", Object::name("Identity-H")),
+                    ("DescendantFonts", Object::Array(vec![Object::Dict(desc)])),
+                ],
+            );
+            Metrics::from_dict(&doc, &f)
+        };
+        let ordinary = widths(0);
+        assert_eq!((ordinary.width(0), ordinary.width(1)), (0.1, 0.2));
+        let last = widths(i64::from(u32::MAX));
+        assert_eq!((last.width(0), last.width(u32::MAX)), (1.0, 0.1));
     }
 
     #[test]
@@ -1309,7 +1905,7 @@ mod tests {
         let map = to_unicode(b"1 beginbfrange <0001> <0003> [<0041> <zz> <0043>] endbfrange");
         assert_eq!((map.get(&2), map.get(&3).map(String::as_str)), (None, Some("C")));
         let mut m = Metrics::fallback();
-        (_, m.cid_map) = parse_cmap(b"1 begincidrange <0000> <FFFF> 4294967295 endcidrange");
+        m.cid_map = Spans::new(parse_cmap(b"1 begincidrange <0000> <FFFF> 4294967295 endcidrange").1);
         assert_eq!(m.cid(5), u32::MAX);
         let mut doc = Document::new_empty();
         let mut enc = Dict::new();
@@ -1486,7 +2082,8 @@ mod tests {
                 assert_eq!(got, expected.get(&code).cloned(), "code {code:#06x} in {cmap}");
             }
             let mut reverse: HashMap<char, u32> = HashMap::new();
-            for (&code, text) in &expected {
+            // Code 0 is CID 0, `.notdef`, which no character is encoded with.
+            for (&code, text) in expected.iter().filter(|&(&code, _)| code != 0) {
                 if let Some(c) = only_char(text) {
                     keep(&mut reverse, c, code);
                 }
@@ -1543,5 +2140,181 @@ mod tests {
         let covered: Vec<u32> = (0..0x70).filter(|&c| u.covering(c).is_some()).collect();
         assert_eq!(covered, [5, 6, 7, 100, 101]);
         assert_eq!((u.covering(0xFFFF).is_some(), u.covering(0x1_0001).is_some(), u.covering(0x1_0002).is_none()), (true, true, true));
+    }
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use pdfcraft_cos::{Dict, Document, Object};
+
+    use super::*;
+
+    /// A simple Type 1 font, optionally symbolic-flagged and optionally with an `/Encoding`.
+    fn simple(base: &str, flags: Option<i64>, enc: Option<Object>) -> (Document, Dict) {
+        let doc = Document::new_empty();
+        let mut d = Dict::new();
+        d.set(b"Type".to_vec(), Object::name("Font"));
+        d.set(b"Subtype".to_vec(), Object::name("Type1"));
+        d.set(b"BaseFont".to_vec(), Object::name(base));
+        if let Some(f) = flags {
+            let mut desc = Dict::new();
+            desc.set(b"Flags".to_vec(), Object::Int(f));
+            d.set(b"FontDescriptor".to_vec(), Object::Dict(desc));
+        }
+        if let Some(e) = enc {
+            d.set(b"Encoding".to_vec(), e);
+        }
+        (doc, d)
+    }
+
+    fn differences(items: Vec<Object>) -> Object {
+        let mut enc = Dict::new();
+        enc.set(b"Differences".to_vec(), Object::Array(items));
+        Object::Dict(enc)
+    }
+
+    #[test]
+    fn glyph_names_follow_the_naming_algorithm() {
+        // Annex D names and the two hex forms, as before.
+        assert_eq!(glyph_text("quotedblleft").as_deref(), Some("\u{201c}"));
+        assert_eq!(glyph_text("uni20AC").as_deref(), Some("\u{20ac}"));
+        assert_eq!(glyph_text("u1F600").as_deref(), Some("\u{1f600}"));
+        // A suffix marks a variant of the same character, so the stem still reads.
+        assert_eq!(glyph_text("a.sc").as_deref(), Some("a"));
+        assert_eq!(glyph_text("one.oldstyle").as_deref(), Some("1"));
+        assert_eq!(glyph_text("A.alt017").as_deref(), Some("A"));
+        // `_` joins components, so a ligature name is more than one character.
+        assert_eq!(glyph_text("f_i").as_deref(), Some("fi"));
+        assert_eq!(glyph_text("f_f_l").as_deref(), Some("ffl"));
+        assert_eq!(glyph_text("a_uni0301").as_deref(), Some("a\u{301}"));
+        // `uniXXXX` carries several values, so one name can be a whole cluster.
+        assert_eq!(glyph_text("uni00660069").as_deref(), Some("fi"));
+        assert_eq!(glyph_text("uni004100300041").as_deref(), Some("A0A"));
+        // Both forms combine with a suffix.
+        assert_eq!(glyph_text("uni00660069.alt").as_deref(), Some("fi"));
+
+        // Not names: unknown, empty, a half-read ligature, bad hex, and the `+` that
+        // `from_str_radix` would otherwise accept.
+        assert_eq!(glyph_text("nonsense"), None);
+        assert_eq!(glyph_text(""), None);
+        assert_eq!(glyph_text(".notdef"), None);
+        assert_eq!(glyph_text("f_nonsense"), None, "half a ligature is not an answer");
+        assert_eq!(glyph_text("uni00"), None, "not a whole four-digit value");
+        assert_eq!(glyph_text("uni0041004"), None);
+        assert_eq!(glyph_text("uni+041"), None, "a sign is not a hex digit");
+        assert_eq!(glyph_text("u+0041"), None);
+        assert_eq!(glyph_text("uniD800"), None, "a lone surrogate half is not a character");
+        // Glyph-index names carry no meaning, and must not be guessed at.
+        assert_eq!(glyph_text("g3"), None);
+        assert_eq!(glyph_text("index42"), None);
+
+        // `glyph_unicode` is the single-character view of the same algorithm.
+        assert_eq!(glyph_unicode("uni20AC"), Some('\u{20ac}'));
+        assert_eq!(glyph_unicode("a.sc"), Some('a'));
+        assert_eq!(glyph_unicode("f_i"), None, "a ligature is not one character");
+    }
+
+    #[test]
+    fn a_ligature_or_unreadable_name_in_differences_is_handled() {
+        // A ligature name maps one code to two characters, so text extraction reads "fi".
+        let (doc, d) = simple("Custom", None, Some(differences(vec![Object::Int(65), Object::name("f_i")])));
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.decode(b"A"), "fi");
+
+        // An unreadable name must *remove* the base encoding's letter rather than leave it
+        // standing in: code 65 is no longer "A", because the font says it is something else.
+        let (doc, d) = simple("Custom", None, Some(differences(vec![Object::Int(65), Object::name("g7")])));
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.text_of(65), None);
+        assert_eq!(m.text_of(66).as_deref(), Some("B"), "neighbouring codes keep their meaning");
+    }
+
+    #[test]
+    fn symbol_and_dingbats_are_not_read_as_latin() {
+        // Symbol's built-in encoding puts `alpha` at 0x61. We hold no table for it, so the honest
+        // answer is none at all -- never "a", which would corrupt find, copy and redaction.
+        for base in ["Symbol", "ZapfDingbats", "ABCDEF+Symbol"] {
+            let (doc, d) = simple(base, Some(4), None);
+            let m = Metrics::from_dict(&doc, &d);
+            assert_eq!(m.text_of(0x61), None, "{base} must not claim 'a'");
+            assert_eq!(m.decode(b"abg"), "", "{base}");
+        }
+
+        // MacExpert is small caps and oldstyle figures at these codes, and we hold no table.
+        let (doc, d) = simple("Times-Roman", None, Some(Object::name("MacExpertEncoding")));
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.text_of(0x61), None);
+
+        // /Differences still applies on top of a built-in encoding we cannot read.
+        let (doc, d) = simple("Symbol", Some(4), Some(differences(vec![Object::Int(0x61), Object::name("uni03B1")])));
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.text_of(0x61).as_deref(), Some("\u{3b1}"), "the font told us this one");
+        assert_eq!(m.text_of(0x62), None, "and nothing about this one");
+    }
+
+    #[test]
+    fn a_named_base_encoding_is_always_honoured() {
+        // Naming an encoding is a deliberate statement, so it wins even on Symbol.
+        for name in ["WinAnsiEncoding", "MacRomanEncoding", "StandardEncoding"] {
+            let mut enc = Dict::new();
+            enc.set(b"BaseEncoding".to_vec(), Object::name(name));
+            let (doc, d) = simple("Symbol", Some(4), Some(Object::Dict(enc)));
+            let m = Metrics::from_dict(&doc, &d);
+            assert_eq!(m.text_of(0x61).as_deref(), Some("a"), "{name} was asked for by name");
+        }
+    }
+
+    /// The Annex D.2 alias codes read, through the whole decode path, as the ink they draw.
+    ///
+    /// This is the map `redact` matches its patterns on (`unicode_map`), so a code that decodes
+    /// to an invisible formatting character is a silent miss, not a cosmetic one: "well-known"
+    /// written with the 0xAD byte matched no search and no redaction pattern.
+    #[test]
+    fn the_alias_codes_decode_as_ordinary_ink_and_encode_back_to_the_low_code() {
+        let (doc, d) = simple("Helvetica", None, Some(Object::name("WinAnsiEncoding")));
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.decode(b"well\xadknown"), "well-known");
+        assert_eq!(m.decode(b"a\xa0b"), "a b");
+        assert_eq!(m.encode("well-known a b").as_deref(), Some(&b"well-known a b"[..]), "the low code is the one written");
+
+        let (doc, d) = simple("Helvetica", None, Some(Object::name("MacRomanEncoding")));
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.decode(b"a\xcab"), "a b");
+        assert_eq!(m.decode(b"a\xadb"), "a\u{2260}b", "MacRoman 0xAD is `notequal`, not a hyphen");
+        assert_eq!(m.encode("a b").as_deref(), Some(&b"a b"[..]));
+
+        // An explicit /Differences name still says what it says: this is a property of those
+        // codes in those tables, not of the glyph names.
+        let (doc, d) = simple("Helvetica", None, Some(differences(vec![Object::Int(0x41), Object::name("sfthyphen"), Object::name("nbspace")])));
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.decode(b"AB"), "\u{ad}\u{a0}");
+    }
+
+    /// Pins a deliberate restraint, so it is not "fixed" into a regression: a great many ordinary
+    /// Latin TrueType subsets set the `/FontDescriptor` symbolic flag and still rely on a Latin
+    /// encoding. Suppressing the implicit table on the flag would lose real text on a large share
+    /// of real documents, so only Symbol and ZapfDingbats -- named, and unambiguous -- suppress it.
+    #[test]
+    fn the_symbolic_flag_alone_does_not_suppress_the_latin_default() {
+        let (doc, d) = simple("SomeSubsetFont", Some(4), None);
+        let m = Metrics::from_dict(&doc, &d);
+        assert_eq!(m.text_of(0x61).as_deref(), Some("a"));
+        assert_eq!(m.decode(b"abc"), "abc");
+    }
+
+    #[test]
+    fn unusable_programs_still_spend_the_decode_budget() {
+        // 128 resources naming one 1 MiB program that isn't a font: each decode is charged,
+        // so an enumeration stops decoding once the shared budget is spent.
+        let mut doc = Document::new_empty();
+        let program = doc.add(pdfcraft_cos::Stream::flate(Dict::new(), &vec![0; 1 << 20]));
+        let descriptor: Dict = [(b"FontFile2".to_vec(), Object::Ref(program))].into_iter().collect();
+        let descriptor = doc.add(descriptor);
+        let font: Dict = [(b"FontDescriptor".to_vec(), Object::Ref(descriptor))].into_iter().collect();
+        let mut budget = DecodeBudget::new(64 << 20, 0);
+        for _ in 0..128 {
+            assert!(embedded_sfnt_within(&doc, &font, &mut budget).is_none());
+        }
+        assert_eq!(budget.remaining(), 0);
     }
 }

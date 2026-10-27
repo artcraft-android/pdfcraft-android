@@ -271,7 +271,8 @@ fn support(a: Point, b: Point, edges: &[Option<Edge>], w: usize, h: usize) -> f6
             edges.get(y as usize * w + x as usize).copied().flatten().is_some_and(|e| {
                 // Either way across: dark-to-light or light-to-dark.
                 let d = (e.dir - normal).rem_euclid(std::f32::consts::PI);
-                d < 0.35 || d > std::f32::consts::PI - 0.35
+                // A NaN direction is no hit, as the two comparisons it replaces said.
+                !d.is_nan() && !(0.35..=std::f32::consts::PI - 0.35).contains(&d)
             })
         });
         hits += hit as usize;

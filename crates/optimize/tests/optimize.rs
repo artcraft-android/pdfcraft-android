@@ -246,6 +246,100 @@ fn space_audit_counts_images_a_content_stream_dictionary_points_at_as_images() {
 }
 
 #[test]
+fn space_audit_counts_what_fields_and_comments_draw_with_by_kind() {
+    // A font or image a form field or comment draws with is still a font or image. The form
+    // was claimed first, so its fonts made a fillable form look like mostly "Forms".
+    let mut doc = Document::new_empty();
+    let p = page(&mut doc, &[], "BT ET");
+    let font = |doc: &mut Document| {
+        let file = doc.add(Object::Stream(Stream::from_raw(Dict::new(), vec![7; 40_000])));
+        let mut desc = Dict::new();
+        desc.set(b"Type".to_vec(), Object::name("FontDescriptor"));
+        desc.set(b"FontFile2".to_vec(), Object::Ref(file));
+        let desc = doc.add(Object::Dict(desc));
+        let mut f = Dict::new();
+        f.set(b"Type".to_vec(), Object::name("Font"));
+        f.set(b"Subtype".to_vec(), Object::name("TrueType"));
+        f.set(b"FontDescriptor".to_vec(), Object::Ref(desc));
+        doc.add(Object::Dict(f))
+    };
+    let (field_font, comment_font) = (font(&mut doc), font(&mut doc));
+    let icon = image(&mut doc, 200, 200, 3, false, None);
+    let appearance = |doc: &mut Document, kind: &str, name: &str, r: ObjRef| {
+        let mut entries = Dict::new();
+        entries.set(name.as_bytes().to_vec(), Object::Ref(r));
+        let mut res = Dict::new();
+        res.set(kind.as_bytes().to_vec(), Object::Dict(entries));
+        let mut d = Dict::new();
+        d.set(b"Subtype".to_vec(), Object::name("Form"));
+        d.set(b"Resources".to_vec(), Object::Dict(res));
+        Object::Ref(doc.add(Object::Stream(Stream::from_raw(d, b"q Q".to_vec()))))
+    };
+    let annot = |doc: &mut Document, subtype: &str, ap: Object| {
+        let mut d = Dict::new();
+        d.set(b"Type".to_vec(), Object::name("Annot"));
+        d.set(b"Subtype".to_vec(), Object::name(subtype));
+        d.set(b"Rect".to_vec(), Object::Array(vec![0.into(), 0.into(), 10.into(), 10.into()]));
+        d.set(b"P".to_vec(), Object::Ref(p));
+        let mut aps = Dict::new();
+        aps.set(b"N".to_vec(), ap);
+        d.set(b"AP".to_vec(), Object::Dict(aps));
+        Object::Ref(doc.add(Object::Dict(d)))
+    };
+    // A text field's appearance uses the form's default font; a check box's "on" state (one of
+    // a dictionary of states) draws an image; a free-text comment has a font of its own.
+    let text_ap = appearance(&mut doc, "Font", "F1", field_font);
+    let text = annot(&mut doc, "Widget", text_ap);
+    let mut states = Dict::new();
+    states.set(b"On".to_vec(), appearance(&mut doc, "XObject", "Im0", icon));
+    let check = annot(&mut doc, "Widget", Object::Dict(states));
+    let comment_ap = appearance(&mut doc, "Font", "F2", comment_font);
+    let comment = annot(&mut doc, "FreeText", comment_ap);
+    doc.update_dict(p, |d| d.set(b"Annots".to_vec(), Object::Array(vec![text.clone(), check.clone(), comment]))).unwrap();
+    let mut fonts = Dict::new();
+    fonts.set(b"F1".to_vec(), Object::Ref(field_font));
+    let mut dr = Dict::new();
+    dr.set(b"Font".to_vec(), Object::Dict(fonts));
+    let mut form = Dict::new();
+    form.set(b"Fields".to_vec(), Object::Array(vec![text, check]));
+    form.set(b"DR".to_vec(), Object::Dict(dr));
+    let root = doc.root().unwrap();
+    doc.update_dict(root, |c| c.set(b"AcroForm".to_vec(), Object::Dict(form))).unwrap();
+    let bytes = write_full(&doc, &SaveOptions { object_streams: false, ..SaveOptions::default() }).unwrap();
+    let doc = Document::open(Arc::new(bytes.clone())).unwrap();
+    let audit = audit_space(&doc, bytes.len() as u64);
+    let get = |c: SpaceCategory| audit.iter().find(|u| u.category == c).unwrap().bytes;
+    assert!(get(SpaceCategory::Fonts) > 80_000, "both fonts are fonts: {audit:?}");
+    assert!(get(SpaceCategory::Images) > 2_000, "the check box's image is an image: {audit:?}");
+    assert!(get(SpaceCategory::Forms) < 2_000 && get(SpaceCategory::Comments) < 1_000, "{audit:?}");
+    assert!(get(SpaceCategory::Forms) > 0 && get(SpaceCategory::Comments) > 0, "the fields and the comment are still counted: {audit:?}");
+}
+
+#[test]
+fn space_audit_survives_deeply_nested_forms() {
+    // Each form draws the next; sorting their resources by kind recursed once per form, so a
+    // long enough chain overflowed the stack.
+    let mut doc = Document::new_empty();
+    let mut next: Option<ObjRef> = None;
+    for _ in 0..20_000 {
+        let mut d = Dict::new();
+        d.set(b"Subtype".to_vec(), Object::name("Form"));
+        if let Some(n) = next {
+            let mut x = Dict::new();
+            x.set(b"X".to_vec(), Object::Ref(n));
+            let mut res = Dict::new();
+            res.set(b"XObject".to_vec(), Object::Dict(x));
+            d.set(b"Resources".to_vec(), Object::Dict(res));
+        }
+        next = Some(doc.add(Object::Stream(Stream::from_raw(d, b"/X Do".to_vec()))));
+    }
+    page(&mut doc, &[("X", next.unwrap())], "/X Do");
+    let audit = audit_space(&doc, 0);
+    let forms = audit.iter().find(|u| u.category == SpaceCategory::XObjectForms).unwrap();
+    assert!(forms.bytes > 20_000 * 40, "every form is counted, however deep: {audit:?}");
+}
+
+#[test]
 fn invalid_links_and_unreferenced_destinations_go() {
     let mut doc = Document::new_empty();
     let p = page(&mut doc, &[], "BT ET");
@@ -686,4 +780,320 @@ fn a_second_run_leaves_the_stripped_stream_alone() {
     let r = optimize(&mut doc, &Settings::default()).unwrap();
     assert_eq!(r.streams_compressed, 0);
     assert_eq!(stream(&doc, c), once);
+}
+
+/// A grey image `w` px wide and one row high, every pixel `v`; JPEG or Flate.
+fn strip(doc: &mut Document, w: u32, v: u8, jpeg: bool) -> ObjRef {
+    let mut d = Dict::new();
+    d.set(b"Type".to_vec(), Object::name("XObject"));
+    d.set(b"Subtype".to_vec(), Object::name("Image"));
+    d.set(b"Width".to_vec(), Object::Int(w as i64));
+    d.set(b"Height".to_vec(), Object::Int(1));
+    d.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+    d.set(b"ColorSpace".to_vec(), Object::name("DeviceGray"));
+    let px = vec![v; w as usize];
+    let s = if jpeg {
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 95).encode(&px, w, 1, image::ExtendedColorType::L8).unwrap();
+        d.set(b"Filter".to_vec(), Object::name("DCTDecode"));
+        Stream::from_raw(d, out)
+    } else {
+        Stream::flate(d, &px)
+    };
+    doc.add(Object::Stream(s))
+}
+
+/// A page drawn the way some PDF printers write a page picture: `rows` images one pixel row
+/// high, 1000 units wide, scaled into a 24 pt square (so 600 ppi across at 200 px). Row `r`
+/// from the top is grey `r`; `edit` changes the content of each row.
+fn printed_page(rows: usize, jpeg: impl Fn(usize) -> bool, edit: impl Fn(usize, String) -> String) -> (Document, Vec<ObjRef>) {
+    let mut doc = Document::new_empty();
+    let mut names = Vec::new();
+    let mut refs = Vec::new();
+    let mut content = String::from("q 0.024 0 0 0.024 0 0 cm\n");
+    for r in 0..rows {
+        let img = strip(&mut doc, 200, r as u8, jpeg(r));
+        refs.push(img);
+        let y = (rows - 1 - r) as f64;
+        content += &edit(r, format!("q 1000 0 0 1 0 {y} cm\n/R{r} Do\nQ\n"));
+        names.push(format!("R{r}"));
+    }
+    content += "Q\n";
+    let xo: Vec<(&str, ObjRef)> = names.iter().map(String::as_str).zip(refs.iter().copied()).collect();
+    let p = page(&mut doc, &xo, &content);
+    // No thumbnail: it would be the old content stream, which still names the strips.
+    doc.update_dict(p, |d| {
+        d.remove(b"Thumb");
+    })
+    .unwrap();
+    (doc, refs)
+}
+
+/// The images the first page's content stream draws, by name, with their streams.
+fn drawn_images(doc: &Document) -> Vec<Stream> {
+    let pages = pdfcraft_annot::page_refs(doc).unwrap();
+    let p = doc.get(pages[0]).as_dict().cloned().unwrap();
+    let res = doc.resolve(p.get(b"Resources").unwrap()).as_dict().cloned().unwrap();
+    let xo = doc.resolve(res.get(b"XObject").unwrap()).as_dict().cloned().unwrap();
+    let c = match &*doc.resolve(p.get(b"Contents").unwrap()) {
+        Object::Stream(s) => s.decoded().unwrap(),
+        _ => panic!("contents"),
+    };
+    pdfcraft_content::parse(&c)
+        .ops
+        .iter()
+        .filter(|o| o.is("Do"))
+        .map(|o| match &*doc.resolve(xo.get(o.name(0).unwrap()).unwrap()) {
+            Object::Stream(s) => s.clone(),
+            _ => panic!("image"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_page_picture_printed_as_one_pixel_strips_is_merged_into_one_image() {
+    // 120 strips, every other one JPEG and half as wide (as one PDF printer writes them).
+    let (mut doc, _) = printed_page(120, |r| r % 2 == 1, |_, s| s);
+    let keep = Settings {
+        gray: ImageSettings { downsample: false, target_ppi: 150.0, above_ppi: 225.0, compression: Compression::Retain },
+        ..Settings::default()
+    };
+    let r = optimize(&mut doc, &keep).unwrap();
+    assert_eq!((r.merged_images, r.fragments_merged), (1, 120), "{r:?}");
+    let drawn = drawn_images(&doc);
+    assert_eq!(drawn.len(), 1, "one image instead of 120");
+    let img = &drawn[0];
+    assert_eq!((img.dict.int(b"Width"), img.dict.int(b"Height")), (Some(200), Some(120)), "the finest resolution both ways");
+    let px = img.decoded().unwrap();
+    // Each row is its strip's grey, top row first; JPEG rows within a few levels.
+    for (row, chunk) in px.chunks(200).enumerate() {
+        assert!(chunk.iter().all(|&v| (v as i32 - row as i32).abs() <= 3), "row {row}: {:?}", &chunk[..4]);
+    }
+    assert_eq!(r.unused_xobjects, 120, "the strips are dropped");
+}
+
+#[test]
+fn the_mobile_preset_makes_a_printed_page_small() {
+    use pdfcraft_optimize::Preset;
+    let (doc, _) = printed_page(200, |_| true, |_, s| s);
+    let bytes = |d: &Document| write_full(d, &SaveOptions::default()).unwrap().len();
+    let before = bytes(&doc);
+    let mut mobile = doc.clone();
+    let r = optimize(&mut mobile, &Preset::Mobile.settings()).unwrap();
+    assert_eq!((r.merged_images, r.images_resampled), (1, 1), "{r:?}");
+    let img = &drawn_images(&mobile)[0];
+    // 24 pt = 1/3 in at 96 ppi.
+    assert_eq!((img.dict.int(b"Width"), img.dict.int(b"Height")), (Some(32), Some(32)));
+    assert_eq!(img.dict.name(b"Filter"), Some(&b"DCTDecode"[..]));
+    assert!(bytes(&mobile) * 10 < before, "{} → {}", before, bytes(&mobile));
+    assert_eq!(Preset::of(&Preset::Mobile.settings()), Some(Preset::Mobile));
+    assert_eq!(Preset::from_name("mobile"), Some(Preset::Mobile));
+}
+
+#[test]
+fn images_that_do_not_tile_a_picture_are_left_alone() {
+    let unmerged = |doc: &mut Document, settings: &Settings| {
+        let r = optimize(doc, settings).unwrap();
+        assert_eq!(r.merged_images, 0, "{r:?}");
+    };
+    let all = Settings::default();
+    // A gap between two rows.
+    let (mut gap, _) =
+        printed_page(40, |_| false, |r, s| if r < 20 { s.replace(&format!(" 0 {} cm", 39 - r), &format!(" 0 {} cm", 41 - r)) } else { s });
+    let r = optimize(&mut gap, &all).unwrap();
+    assert_eq!((r.merged_images, r.fragments_merged), (2, 40), "one picture each side of the gap: {r:?}");
+    // Rotated rows.
+    let (mut turned, _) = printed_page(40, |_| false, |_, s| s.replace("q 1000 0 0 1", "q 0 1 -1000 0"));
+    unmerged(&mut turned, &all);
+    // Something else drawn between the rows.
+    let (mut between, _) = printed_page(40, |_| false, |r, s| if r == 10 { format!("0 0 10 10 re f\n{s}") } else { s });
+    let r = optimize(&mut between, &all).unwrap();
+    assert_eq!((r.merged_images, r.fragments_merged), (2, 40), "two runs, each side of the fill: {r:?}");
+    // Too few rows, and the option off.
+    let (mut few, _) = printed_page(3, |_| false, |_, s| s);
+    unmerged(&mut few, &all);
+    let (mut off, _) = printed_page(40, |_| false, |_, s| s);
+    unmerged(&mut off, &Settings { merge_fragments: false, ..Settings::default() });
+}
+
+/// `levels` nested forms with their own resources, the innermost drawing `img` over the unit square.
+fn nested_forms(doc: &mut Document, img: ObjRef, levels: usize) -> ObjRef {
+    let mut inner = form(doc, Some(Object::Dict(resources(xobjects(&[("Im", img)])))), "/Im Do");
+    for _ in 1..levels {
+        inner = form(doc, Some(Object::Dict(resources(xobjects(&[("F", inner)])))), "/F Do");
+    }
+    inner
+}
+
+#[test]
+fn a_deeply_nested_form_is_measured_at_its_largest_use() {
+    // 1200 px drawn 1 in wide (1200 ppi) and then 8 in wide (150 ppi): 150 ppi, so it isn't resampled.
+    let small = "q 72 0 0 72 36 36 cm /F Do Q";
+    let large = "q 576 0 0 576 18 100 cm /F Do Q";
+    for levels in [1, 6, 12] {
+        for (pages, label) in [(vec![format!("{small} {large}")], "one page"), (vec![small.into(), large.into()], "two pages")] {
+            let mut doc = Document::new_empty();
+            let img = image(&mut doc, 1200, 1200, 3, false, None);
+            let outer = nested_forms(&mut doc, img, levels);
+            for c in &pages {
+                page(&mut doc, &[("F", outer)], c);
+            }
+            let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+            assert_eq!(effective_resolutions(&doc, &refs)[&img].round(), 150.0, "{levels} levels, {label}");
+            optimize(&mut doc, &Settings::default()).unwrap();
+            assert_eq!(stream(&doc, img).dict.int(b"Width"), Some(1200), "{levels} levels, {label}");
+        }
+    }
+}
+
+#[test]
+fn a_form_drawing_itself_is_walked_once_per_use() {
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let f = form(&mut doc, None, "/Im Do q 2 0 0 2 0 0 cm /F Do Q");
+    let mut x = xobjects(&[("Im", img)]);
+    x.set(b"F".to_vec(), Object::Ref(f));
+    let mut d = match &*doc.get(f) {
+        Object::Stream(s) => s.clone(),
+        _ => unreachable!(),
+    };
+    d.dict.set(b"Resources".to_vec(), Object::Dict(resources(x)));
+    doc.set(f, Object::Stream(d));
+    page(&mut doc, &[("F", f)], "q 72 0 0 72 36 36 cm /F Do Q");
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    // Only the outer use: the cycle isn't followed, and doesn't count as a missed use.
+    assert_eq!(effective_resolutions(&doc, &refs)[&img].round(), 1200.0);
+}
+
+#[test]
+fn a_shared_form_without_resources_draws_each_callers_image() {
+    // G has no /Resources, so its /Im is whichever image the form drawing it names.
+    let mut doc = Document::new_empty();
+    let a = image(&mut doc, 1200, 1200, 3, false, None);
+    let b = image(&mut doc, 1200, 1200, 3, false, None);
+    let g = form(&mut doc, None, "/Im Do");
+    let mut outers = Vec::new();
+    for img in [a, b] {
+        let mut inner = form(&mut doc, Some(Object::Dict(resources(xobjects(&[("Im", img), ("G", g)])))), "/G Do");
+        for _ in 1..6 {
+            inner = form(&mut doc, Some(Object::Dict(resources(xobjects(&[("F", inner)])))), "/F Do");
+        }
+        outers.push(inner);
+    }
+    page(&mut doc, &[("A", outers[0]), ("B", outers[1])], "q 72 0 0 72 36 36 cm /A Do Q q 576 0 0 576 18 100 cm /B Do Q");
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    let ppi = effective_resolutions(&doc, &refs);
+    assert_eq!(ppi[&a].round(), 1200.0);
+    assert_eq!(ppi.get(&b).map(|p| p.round()), Some(150.0));
+}
+
+#[test]
+fn images_are_not_resampled_when_some_uses_could_not_be_measured() {
+    // Too deep: the 13th form isn't followed, so its use of the image is unknown.
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let other = image(&mut doc, 1200, 1200, 3, false, None);
+    let deep = nested_forms(&mut doc, img, 13);
+    page(
+        &mut doc,
+        &[("F", deep), ("Im", img), ("O", other)],
+        "q 72 0 0 72 36 36 cm /Im Do Q q 72 0 0 72 200 36 cm /O Do Q q 576 0 0 576 18 100 cm /F Do Q",
+    );
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    let ppi = effective_resolutions(&doc, &refs);
+    assert_eq!((ppi[&img], ppi[&other]), (f64::INFINITY, f64::INFINITY));
+    optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(stream(&doc, img).dict.int(b"Width"), Some(1200));
+
+    // Too much work: forms without resources (so nothing can be skipped), each drawing the next
+    // three times, twelve deep, would be (3^12 - 1) / 2 walks.
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let mut names = vec![("Im", img)];
+    let mut next = "Im";
+    let labels = ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"];
+    for (i, label) in labels.iter().enumerate().rev() {
+        let s = 1.0 + i as f64 / 100.0;
+        let f = form(&mut doc, None, &format!("q {s} 0 0 {s} 0 0 cm /{next} Do Q /{next} Do q 1 0 0 1 1 0 cm /{next} Do Q"));
+        names.push((label, f));
+        next = label;
+    }
+    page(&mut doc, &names, "q 72 0 0 72 36 36 cm /F1 Do Q");
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    assert_eq!(effective_resolutions(&doc, &refs)[&img], f64::INFINITY);
+}
+
+/// Each form entry counts against the page's form allowance, even for a form that decodes to
+/// nothing and so costs no decoded bytes.
+#[test]
+fn images_are_not_resampled_when_a_page_enters_more_forms_than_allowed() {
+    let mut doc = Document::new_empty();
+    let img = image(&mut doc, 1200, 1200, 3, false, None);
+    let empty = form(&mut doc, None, "");
+    let draws = "/E Do ".repeat(pdfcraft_cos::MAX_PAGE_FORMS + 1);
+    page(&mut doc, &[("E", empty), ("Im", img)], &format!("q 72 0 0 72 36 36 cm /Im Do Q {draws}"));
+    let refs = pdfcraft_annot::page_refs(&doc).unwrap();
+    assert_eq!(effective_resolutions(&doc, &refs)[&img], f64::INFINITY);
+}
+
+#[test]
+fn image_resolution_keeps_comments_across_content_pieces() {
+    for ending in ["", "\n", "\r", "\r\n"] {
+        let mut doc = Document::new_empty();
+        let visible = image(&mut doc, 20, 20, 3, false, None);
+        let hidden = image(&mut doc, 20, 20, 3, false, None);
+        let page = page(&mut doc, &[("Visible", visible), ("Hidden", hidden)], "");
+        let first = doc
+            .add(Object::Stream(Stream::from_raw(Dict::new(), format!("q 72 0 0 72 0 0 cm /Visible Do Q\n% trailing comment{ending}").into_bytes())));
+        let second = doc.add(Object::Stream(Stream::from_raw(Dict::new(), b"q 144 0 0 144 0 0 cm /Hidden Do Q\n".to_vec())));
+        doc.update_dict(page, |dict| {
+            dict.set(b"Contents".to_vec(), Object::Array(vec![Object::Ref(first), Object::Int(17), Object::Ref(second)]));
+        })
+        .unwrap();
+        let measured = effective_resolutions(&doc, &[page]);
+        assert_eq!(measured.get(&visible), Some(&20.0));
+        if ending.is_empty() {
+            assert_eq!(measured.len(), 1);
+            assert_eq!(measured.get(&hidden), None, "a comment must hide the next piece's first line");
+        } else {
+            assert_eq!(measured.len(), 2);
+            assert_eq!(measured.get(&hidden), Some(&10.0), "a real line ending exposes the image");
+        }
+    }
+}
+
+#[test]
+fn a_hostile_image_size_is_left_alone_not_multiplied_into_overflow() {
+    // /Width and /Height are file-controlled: 2^32 + 100 wraps to 100 when read as u32, while the
+    // real values overflow `w * h * n`. The image must be skipped, not sized by a wrapped product.
+    let mut doc = Document::new_empty();
+    let side = i64::from(u32::MAX) + 101;
+    let mut d = Dict::new();
+    d.set(b"Type".to_vec(), Object::name("XObject"));
+    d.set(b"Subtype".to_vec(), Object::name("Image"));
+    d.set(b"Width".to_vec(), Object::Int(side));
+    d.set(b"Height".to_vec(), Object::Int(side));
+    d.set(b"BitsPerComponent".to_vec(), Object::Int(8));
+    d.set(b"ColorSpace".to_vec(), Object::name("DeviceGray"));
+    let hostile = doc.add(Object::Stream(Stream::flate(d, &[7u8; 256])));
+    page(&mut doc, &[("Im", hostile)], "q 1 0 0 1 10 10 cm /Im Do Q");
+    let report = optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(report.images_resampled, 0, "{report:?}");
+    assert_eq!(stream(&doc, hostile).dict.int(b"Width"), Some(side), "the image is left as it was");
+}
+
+#[test]
+fn a_hostile_soft_mask_leaves_its_image_unchanged() {
+    let mut doc = Document::new_empty();
+    let mask = image(&mut doc, 400, 400, 1, false, None);
+    let mut hostile = stream(&doc, mask);
+    hostile.dict.set(b"Width".to_vec(), Object::Int(i64::from(u32::MAX) + 401));
+    doc.set(mask, Object::Stream(hostile.clone()));
+    let photo = image(&mut doc, 400, 400, 3, false, Some(mask));
+    let before = stream(&doc, photo);
+    page(&mut doc, &[("Photo", photo)], "q 72 0 0 72 10 10 cm /Photo Do Q");
+    let report = optimize(&mut doc, &Settings::default()).unwrap();
+    assert_eq!(report.images_resampled, 0, "{report:?}");
+    assert_eq!(stream(&doc, photo), before);
+    assert_eq!(stream(&doc, mask), hostile);
 }

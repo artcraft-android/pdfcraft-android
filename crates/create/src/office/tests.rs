@@ -216,7 +216,7 @@ fn err(name: &str, bytes: &[u8]) -> String {
     }
 }
 
-/// Text is measured with the standard-14 metrics (vendored hayro-interpret patch 25), so lines
+/// Text is measured with the standard-14 metrics (vendored hayro-interpret patch 51), so lines
 /// break where the viewer's glyphs actually end.
 #[test]
 fn standard_font_widths_come_from_the_metrics() {

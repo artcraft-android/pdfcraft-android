@@ -3,6 +3,9 @@
 The façade every frontend talks to. It holds the open documents, their edit history and the tool
 catalogue; frontends never reach past it into the parsing, rendering or editing crates.
 
+`word_count::count` provides cancellable, page-at-a-time Unicode word and character statistics
+with optional semantic exclusions; see [word-count behavior and limits](../../docs/word-count.md).
+
 - **Layer:** L6. It depends on most of L1–L4 and on nothing above itself. **No UI toolkit** —
   `egui`, `winit`, `eframe` and `rfd` are forbidden below L7, and `xtask layers` enforces it.
 - The crate denies `unwrap`/`expect`/`panic!`/`todo!`. Entry points that run untrusted-document

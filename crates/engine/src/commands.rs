@@ -26,6 +26,8 @@ pub enum Needs {
     Annotate,
     /// The open document's security allows copying text and images out of it.
     Copying,
+    /// The open document's security allows printing (low resolution counts).
+    Printing,
     /// The document has form fields and its security allows filling them in.
     FillForms,
     /// The document has comments and allows changes.
@@ -188,8 +190,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("file.close", "Close file", FILE, Some(Shortcut::cmd("W")), Document, "x"),
     c("file.close_all", "Close all", FILE, Some(Shortcut::cmd_shift("W")), Document, "x"),
     c("file.revert", "Revert", FILE, None, Undo, "rotate-ccw"),
-    c("print.dialog", "Print…", FILE, Some(Shortcut::cmd("P")), Document, "printer"),
+    c("print.dialog", "Print…", FILE, Some(Shortcut::cmd("P")), Printing, "printer"),
     c("file.properties", "Document properties…", FILE, Some(Shortcut::cmd("D")), Document, "info"),
+    c("file.word_count", "Word count…", FILE, None, Copying, "hash"),
     ct("edit.undo", "Undo", EDIT, Some(Shortcut::cmd("Z")), Undo, "undo-2"),
     ct("edit.redo", "Redo", EDIT, Some(Shortcut::cmd_shift("Z")), Redo, "redo-2"),
     c("edit.find", "Find…", EDIT, Some(Shortcut::cmd("F")), Document, "search"),
@@ -201,6 +204,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("view.layout.single", "Single page", None, None, Document, "file-text"),
     c("view.layout.two_up", "Two-page view", None, None, Document, "columns-2"),
     c("view.continuous", "Continuous scrolling", None, None, Document, "arrow-up-down"),
+    c("view.page_gaps", "Show gaps between pages", None, None, Document, "arrow-up-down"),
     c("view.layout.cover", "Show cover page in two-page view", None, None, TwoPageView, "bookmark"),
     // Acrobat's view modes, a page display and a zoom at once (the rail's Page display menu).
     c("view.fit_width_scrolling", "Fit to width scrolling", None, None, Document, "arrow-left-right"),
@@ -212,10 +216,20 @@ pub const COMMANDS: &[CommandSpec] = &[
     // Acrobat's column select: drag a rectangle and select only the text inside it. Alt/Option-
     // drag with the Select tool does the same; this is the way in where the desktop takes
     // Alt-drag for moving windows (several Linux window managers).
+    // Copy events stay with the frontend so focused text inputs and page clipboard routing keep ownership.
+    c("edit.copy", "Copy", EDIT, None, Copying, "copy"),
     c("edit.column_select", "Column select", EDIT, None, Document, "text-select"),
     c("edit.snapshot", "Take a snapshot", EDIT, None, Copying, "camera"),
     c("view.full_screen", "Full screen mode", VIEW, Some(Shortcut::cmd("L")), Document, "maximize"),
     c("view.read_mode", "Read mode", VIEW, Some(Shortcut { command: true, shift: false, mac_ctrl: true, key: "H" }), Document, "book-open"),
+    // Browsers' tab keys (#1542): Ctrl+Tab on every platform, ⌃Tab rather than ⌘Tab on macOS,
+    // where the system takes ⌘Tab. They follow the tabs' order on screen and wrap around, and
+    // also run from Combine files, which has no document open.
+    c("view.next_tab", "Next tab", VIEW, Some(Shortcut { command: false, shift: false, mac_ctrl: true, key: "Tab" }), Nothing, "chevron-right"),
+    c("view.previous_tab", "Previous tab", VIEW, Some(Shortcut { command: false, shift: true, mac_ctrl: true, key: "Tab" }), Nothing, "chevron-left"),
+    // View-local history also appears in the Page navigation section; don't duplicate its menu.
+    c("view.previous_view", "Previous view", None, Some(Shortcut::cmd("[")), Document, "chevron-left"),
+    c("view.next_view", "Next view", None, Some(Shortcut::cmd("]")), Document, "chevron-right"),
     c("view.focus_page_input", "Go to page…", VIEW, Some(Shortcut::cmd_shift("N")), Document, "text-cursor-input"),
     c("ui.dock.reset", "Reset panel layout", VIEW, None, Nothing, "settings"),
     c("view.theme", "Switch light / dark theme", None, None, Nothing, "moon"),
@@ -264,6 +278,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("form.tab_order.row", "Tab order: by rows", None, None, HasFields, "rows-3"),
     c("form.tab_order.column", "Tab order: by columns", None, None, HasFields, "columns-3"),
     c("form.tab_order.structure", "Tab order: by document structure", None, None, HasFields, "list"),
+    c("form.calculation_order", "Calculation order", None, None, Document, "list-ordered"),
     c("edit.text", "Add text", None, None, Modification, "type"),
     c("edit.edit_text", "Edit text & images", None, None, Modification, "text-cursor-input"),
     c("edit.link", "Add or edit links", None, None, Modification, "link-2"),
@@ -281,6 +296,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("redact.sanitize", "Sanitize document…", None, None, Modification, "sparkles"),
     c("form.field.properties", "Field properties…", None, None, HasFields, "settings-2"),
     c("form.add.text", "Add a text field", None, None, Modification, "text-cursor-input"),
+    c("form.add.text_table", "Add text field table", None, None, Modification, "grid-3x3"),
     c("form.add.checkbox", "Add a checkbox", None, None, Modification, "check-circle-2"),
     c("form.add.radio", "Add a radio button", None, None, Modification, "circle"),
     c("form.add.combo", "Add a drop-down list", None, None, Modification, "chevron-down"),
@@ -322,9 +338,13 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("ocr.enhance_camera", "Enhance camera image", None, None, Modification, "camera"),
     c("ocr.recognize_batch", "Recognize text in multiple files…", None, None, Nothing, "files"),
     c("a11y.check", "Check for accessibility…", None, None, Document, "accessibility"),
+    c("a11y.find_untagged", "Find untagged content", None, None, Document, "search"),
+    c("a11y.autotag", "Automatically tag PDF", None, None, Document, "tag"),
     c("a11y.report", "Open accessibility report", None, None, Document, "file-text"),
     c("a11y.reading_options", "Change reading options…", None, None, Document, "book-open"),
     c("a11y.alt_text", "Add alternate text…", None, None, Modification, "image"),
+    c("a11y.autotag_fields", "Tag form fields", None, None, Modification, "tag"),
+    c("a11y.tags", "Tags panel", None, None, Document, "tag"),
     c("export.all_images", "Export all images…", FILE, None, Copying, "image"),
     c("edit.header_footer", "Add header & footer…", None, None, Modification, "heading"),
     c("edit.header_footer.update", "Update header & footer…", None, None, Marks(crate::MarkKind::HeaderFooter), "heading"),
@@ -348,6 +368,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("page.insert_blank", "Insert blank page", PAGES, None, Assembly, "file-plus"),
     c("page.rotate_dialog", "Rotate pages…", PAGES, None, Assembly, "rotate-cw"),
     c("page.duplicate", "Duplicate pages", PAGES, None, Assembly, "copy-plus"),
+    c("page.reverse", "Reverse pages", PAGES, None, Assembly, "arrow-up-down"),
     c("page.crop", "Crop pages", PAGES, None, Assembly, "crop"),
     c("page.boxes", "Set page boxes…", PAGES, None, Assembly, "square-dashed-mouse-pointer"),
     c("page.insert", "Insert pages from file…", PAGES, None, Assembly, "file-input"),
@@ -383,8 +404,9 @@ pub fn is_enabled(spec: &CommandSpec, session: &Session, active: Option<DocId>) 
         Modification => doc.is_some_and(|d| d.allows_modification()),
         Annotate => doc.is_some_and(|d| d.allows_annotation()),
         Copying => doc.is_some_and(|d| d.allows_copying()),
+        Printing => doc.is_some_and(|d| d.allows_printing()),
         FillForms => doc.is_some_and(|d| d.allows_form_filling() && !d.form.is_empty()),
-        Marks(k) => doc.is_some_and(|d| d.allows_modification() && d.marks.contains(&k)),
+        Marks(k) => doc.is_some_and(|d| d.allows_modification() && d.marks().contains(&k)),
         HasComments => doc.is_some_and(|d| d.allows_modification() && !d.info.annotations.is_empty()),
         HasFields => doc.is_some_and(|d| d.allows_modification() && !d.form.is_empty()),
         HasRedactions => doc.is_some_and(|d| d.allows_modification() && d.redaction_marks() > 0),

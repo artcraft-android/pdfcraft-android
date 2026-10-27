@@ -6,7 +6,7 @@
 //! Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript is [`Session::set_javascript`]; with it
 //! off, scripts don't run and AF calls keep working natively.
 
-use pdfcraft_forms::{Field, FieldChange, FieldEvent, FieldKind, ScriptResult, Scripts};
+use pdfcraft_forms::{Field, FieldChange, FieldEvent, FieldKind, FieldProps, ScriptResult, Scripts};
 pub use pdfcraft_js::{Limits, Outcome, Request};
 
 use crate::{DocId, Edit, EditError, Session};
@@ -70,11 +70,15 @@ fn display(doc: &pdfcraft_cos::Document, f: &Field) -> i32 {
 
 /// A form field as scripts see it.
 pub fn field_state(doc: &pdfcraft_cos::Document, f: &Field) -> pdfcraft_js::FieldState {
+    field_state_with_display(f, display(doc, f))
+}
+
+fn field_state_with_display(f: &Field, display: i32) -> pdfcraft_js::FieldState {
     let mut s = pdfcraft_js::FieldState::new(f.name.clone(), kind(f.kind), f.value.clone());
     s.default = f.default.clone();
     s.readonly = f.read_only();
     s.required = f.has(pdfcraft_forms::flags::REQUIRED);
-    s.display = display(doc, f);
+    s.display = display;
     s.char_limit = f.max_len;
     s.options = match f.kind {
         FieldKind::CheckBox | FieldKind::Radio => f.widgets.iter().filter_map(|w| w.on_state.clone()).map(|o| (o.clone(), o)).collect(),
@@ -85,10 +89,19 @@ pub fn field_state(doc: &pdfcraft_cos::Document, f: &Field) -> pdfcraft_js::Fiel
 
 /// The changes a script made, against the fields as they were.
 fn changes(before: &[pdfcraft_js::FieldState], after: &[pdfcraft_js::FieldState]) -> Vec<FieldChange> {
+    if after.is_empty() {
+        return Vec::new();
+    }
+    // Outcomes contain only fields touched by the script. Index the original snapshot once,
+    // keeping the first match as the old linear lookup did for malformed duplicate names.
+    let mut by_name = std::collections::HashMap::with_capacity(before.len());
+    for field in before {
+        by_name.entry(field.name.as_str()).or_insert(field);
+    }
     after
         .iter()
         .filter_map(|a| {
-            let b = before.iter().find(|b| b.name == a.name)?;
+            let b = by_name.get(a.name.as_str())?;
             let c = FieldChange {
                 name: a.name.clone(),
                 value: (a.value != b.value).then(|| a.value.clone()),
@@ -106,14 +119,25 @@ pub struct JsRunner {
     pub doc: pdfcraft_js::DocInfo,
     pub doc_scripts: Vec<String>,
     pub output: JsOutput,
-    /// The fields in the document as the forms code last read them (for `display`).
+    /// Immutable document snapshot from the start of the edit (for widget `display`).
     cos: pdfcraft_cos::Document,
+    // `cos` is the same immutable pre-edit snapshot for the runner's lifetime. Cache only
+    // its scalar display readings, not COS objects: large forms exceed the object cache and
+    // otherwise reparse every widget for every calculation. Values/flags still come from
+    // the live `fields` snapshot on each call. A new edit gets a new runner and cache.
+    displays: std::collections::HashMap<pdfcraft_cos::ObjRef, i32>,
 }
 
 impl JsRunner {
     pub fn new(cos: &pdfcraft_cos::Document, file_name: &str) -> JsRunner {
         let doc = pdfcraft_js::DocInfo { file_name: file_name.to_string(), num_pages: pdfcraft_model::pages(cos).len(), page: 0, info: info(cos) };
-        JsRunner { doc, doc_scripts: pdfcraft_forms::document_scripts(cos), output: JsOutput::default(), cos: cos.clone() }
+        JsRunner {
+            doc,
+            doc_scripts: pdfcraft_forms::document_scripts(cos),
+            output: JsOutput::default(),
+            cos: cos.clone(),
+            displays: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -130,19 +154,28 @@ fn info(cos: &pdfcraft_cos::Document) -> Vec<(String, String)> {
 
 impl Scripts for JsRunner {
     fn run(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult {
-        let states: Vec<_> = fields.iter().map(|f| field_state(&self.cos, f)).collect();
+        let states: Vec<_> = fields
+            .iter()
+            .map(|f| {
+                let display = match f.widgets.first() {
+                    Some(w) => *self.displays.entry(w.obj).or_insert_with(|| display(&self.cos, f)),
+                    None => pdfcraft_js::DISPLAY_VISIBLE,
+                };
+                field_state_with_display(f, display)
+            })
+            .collect();
+        let states = std::sync::Arc::new(states);
         let ev = pdfcraft_js::Event::field(event.name(), &target.name, value);
-        let o = pdfcraft_js::run(script, &ev, &self.doc, &states, &self.doc_scripts, Limits::default());
+        let o = pdfcraft_js::run_shared(script, &ev, &self.doc, std::sync::Arc::clone(&states), &self.doc_scripts, Limits::default());
         self.output.absorb(&o);
         if o.error.is_some() {
             // As in Acrobat, a failing script leaves the value alone (the error goes to the console).
             return ScriptResult { rc: true, value: value.to_string(), changes: Vec::new(), message: None };
         }
-        let after: Vec<_> = states.iter().map(|s| o.changed.iter().find(|c| c.name == s.name).unwrap_or(s).clone()).collect();
         ScriptResult {
             rc: o.rc,
             value: o.value.clone(),
-            changes: changes(&states, &after),
+            changes: changes(&states, &o.changed),
             message: (!o.rc).then(|| o.alerts.last().cloned()).flatten(),
         }
     }
@@ -192,7 +225,8 @@ impl Session {
         // A button PdfCraft generated from an XFA template runs its XFA click script.
         if let Some(t) = target
             && let Some(tpl) = doc.xfa_template.clone()
-            && let Some(som) = crate::xfa::clickable_som(&cos, &tpl, t)
+            && let Some(field) = doc.form.iter().find(|f| f.name == t)
+            && let Some(som) = crate::xfa::clickable_som(&cos, &tpl, field)
         {
             self.apply(id, Edit::XfaEvent { som, activity: "click".into() })?;
             let out = self.take_js_output(id);
@@ -213,8 +247,7 @@ impl Session {
             None => pdfcraft_js::Event::doc("Console"),
         };
         let mut o = pdfcraft_js::run(script, &event, &runner.doc, &states, &runner.doc_scripts, Limits::default());
-        let after: Vec<_> = states.iter().map(|s| o.changed.iter().find(|c| c.name == s.name).unwrap_or(s).clone()).collect();
-        let changes = changes(&states, &after);
+        let changes = changes(&states, &o.changed);
         let resets: Vec<Vec<String>> = o
             .requests
             .iter()
@@ -250,10 +283,27 @@ fn detection_words(text: &pdfcraft_render::PageText, info: &pdfcraft_render::Pag
 /// A page's words in reading order, in user space ([x0, y0, x1, y1]); runs of underscores are
 /// words of their own.
 pub(crate) fn page_words(text: &pdfcraft_render::PageText, info: &pdfcraft_render::PageInfo) -> Vec<(String, [f64; 4])> {
+    words_with(text, |x, y| info.view_to_user(x, y))
+        .into_iter()
+        .map(|(text, r)| (text, [f64::from(r[0]), f64::from(r[1]), f64::from(r[2]), f64::from(r[3])]))
+        .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Characters read to tell underscore runs from other words.
+    static UNDERSCORE_CHARS_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A page's words in reading order, their boxes mapped from view space by `map` (and ordered
+/// again, so that [x0, y0, x1, y1] holds whatever way `map` turns them).
+pub(crate) fn words_with(text: &pdfcraft_render::PageText, map: impl Fn(f32, f32) -> [f32; 2]) -> Vec<(String, [f32; 4])> {
     let mut words: Vec<(String, [f32; 4])> = Vec::new();
     let mut last_line = u32::MAX;
     // A space glyph ends the word before it.
     let mut gap = false;
+    // Whether the last word is an underscore run (a form's blank), which other glyphs don't join.
+    let mut last_under = false;
     for (i, g) in text.glyphs.iter().enumerate() {
         let line = text.line_of.get(i).copied().unwrap_or(0);
         if g.text.trim().is_empty() {
@@ -261,10 +311,9 @@ pub(crate) fn page_words(text: &pdfcraft_render::PageText, info: &pdfcraft_rende
             continue;
         }
         let under = g.text.chars().all(|c| c == '_');
-        let breaks = match words.last() {
-            None => true,
-            Some((w, _)) => gap || line != last_line || text.space_before.get(i).copied().unwrap_or(false) || w.chars().all(|c| c == '_') != under,
-        };
+        #[cfg(test)]
+        UNDERSCORE_CHARS_READ.with(|n| n.set(n.get() + g.text.len()));
+        let breaks = words.is_empty() || gap || line != last_line || text.space_before.get(i).copied().unwrap_or(false) || last_under != under;
         gap = false;
         last_line = line;
         match words.last_mut() {
@@ -275,24 +324,32 @@ pub(crate) fn page_words(text: &pdfcraft_render::PageText, info: &pdfcraft_rende
                 r[2] = r[2].max(g.rect[2]);
                 r[3] = r[3].max(g.rect[3]);
             }
-            _ => words.push((g.text.clone(), g.rect)),
+            _ => {
+                words.push((g.text.clone(), g.rect));
+                last_under = under;
+            }
         }
     }
     words
         .into_iter()
         .map(|(text, r)| {
-            let a = info.view_to_user(r[0], r[1]);
-            let b = info.view_to_user(r[2], r[3]);
-            let rect = [a[0].min(b[0]) as f64, a[1].min(b[1]) as f64, a[0].max(b[0]) as f64, a[1].max(b[1]) as f64];
-            (text, rect)
+            let a = map(r[0], r[1]);
+            let b = map(r[2], r[3]);
+            (text, [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])])
         })
         .collect()
 }
 
 impl Session {
     /// Prepare a form ▸ automatic field detection: the fields `pages` (0-based; empty = all)
-    /// seem to ask for, named from their labels, as (page, candidate).
+    /// seem to ask for, named from their labels, as (page, candidate). Scanned pages (a picture
+    /// and no drawn shapes) are read from their pixels, see [`crate::scan_fields`].
     pub fn detect_fields(&self, id: DocId, pages: &[usize]) -> Vec<(usize, pdfcraft_forms::detect::Candidate)> {
+        self.detect_fields_turned(id, pages).into_iter().map(|(page, c, _)| (page, c)).collect()
+    }
+
+    /// [`Self::detect_fields`], with how far each field turns (`/MK /R`) to read upright.
+    fn detect_fields_turned(&self, id: DocId, pages: &[usize]) -> Vec<(usize, pdfcraft_forms::detect::Candidate, i64)> {
         let Some(doc) = self.get(id) else { return Vec::new() };
         let Some(cos) = doc.editor.as_ref().map(|e| &e.cos) else { return Vec::new() };
         let config = pdfcraft_render::RenderConfig { password: doc.password.as_deref().map(std::sync::Arc::from), ..Default::default() };
@@ -302,13 +359,19 @@ impl Session {
         let list: Vec<usize> = if pages.is_empty() { (0..all).collect() } else { pages.iter().copied().filter(|p| *p < all).collect() };
         let mut out = Vec::new();
         for page in list {
+            let Some(info) = doc.info.pages.get(page) else { continue };
             let res = r.render(pdfcraft_render::RenderRequest { page, kind: pdfcraft_render::RequestKind::Text, scale: 1.0, ..Default::default() });
-            let words = res.text.map(|t| detection_words(&t, &doc.info.pages[page])).unwrap_or_default();
             let shapes = pdfcraft_forms::detect::page_shapes(cos, page);
             let existing: Vec<[f64; 4]> = doc.form.iter().flat_map(|f| f.widgets.iter()).filter(|w| w.page == Some(page)).map(|w| w.rect).collect();
-            for c in pdfcraft_forms::detect::detect(&words, &shapes, &existing, &taken) {
+            let (found, turn) = if shapes.boxes.is_empty() && shapes.rules.is_empty() && crate::scan_fields::is_scan(doc, page, info) {
+                self.detect_on_scan(id, &mut r, page, res.text.as_deref(), &existing, &taken)
+            } else {
+                let words = res.text.map(|t| detection_words(&t, info)).unwrap_or_default();
+                (pdfcraft_forms::detect::detect(&words, &shapes, &existing, &taken), 0)
+            };
+            for c in found {
                 taken.push(c.name.clone());
-                out.push((page, c));
+                out.push((page, c, turn));
             }
         }
         out
@@ -316,24 +379,103 @@ impl Session {
 
     /// Detect fields and add them, as one undoable step. Returns the new fields' names.
     pub fn auto_detect_fields(&mut self, id: DocId, pages: &[usize]) -> Result<Vec<String>, EditError> {
-        let found = self.detect_fields(id, pages);
+        let found = self.detect_fields_turned(id, pages);
         if found.is_empty() {
             return Ok(Vec::new());
         }
-        let names = found.iter().map(|(_, c)| c.name.clone()).collect();
-        let edits = found
-            .into_iter()
-            .map(|(page, c)| Edit::AddField {
-                page,
-                rect: c.rect,
-                kind: match c.kind {
-                    pdfcraft_forms::detect::Kind::Text => pdfcraft_forms::NewField::Text { multiline: c.rect[3] - c.rect[1] > 30.0 },
-                    pdfcraft_forms::detect::Kind::CheckBox => pdfcraft_forms::NewField::CheckBox,
-                },
-                name: Some(c.name),
-            })
-            .collect();
+        let names = found.iter().map(|(_, c, _)| c.name.clone()).collect();
+        let mut edits = Vec::with_capacity(found.len());
+        for (page, c, turn) in found {
+            let tall = if turn % 180 == 0 { c.rect[3] - c.rect[1] } else { c.rect[2] - c.rect[0] };
+            let (kind, comb) = match c.kind {
+                pdfcraft_forms::detect::Kind::Text => (pdfcraft_forms::NewField::Text { multiline: tall > 30.0 }, None),
+                pdfcraft_forms::detect::Kind::CheckBox => (pdfcraft_forms::NewField::CheckBox, None),
+                pdfcraft_forms::detect::Kind::Comb { cells } => (pdfcraft_forms::NewField::Text { multiline: false }, Some(cells)),
+            };
+            // The page already draws the line or box the field sits on, so the field gets no
+            // border or fill of its own: an opaque fill would hide the printed form (#294, #2831).
+            let mut props = FieldProps {
+                appearance: Some(pdfcraft_forms::LookPatch { border: Some(None), fill: Some(None), ..Default::default() }),
+                ..Default::default()
+            };
+            if turn != 0 {
+                // A turned field keeps its place: the rectangle is already the one on the page.
+                props.rotation = Some((0, turn));
+                props.rect = Some((0, c.rect));
+            }
+            if let Some(cells) = comb {
+                props.max_len = Some(Some(cells));
+                props.flags = vec![(pdfcraft_forms::flags::COMB, true)];
+            }
+            edits.push(Edit::AddField { page, rect: c.rect, kind, name: Some(c.name.clone()) });
+            edits.push(Edit::SetFieldProps { name: c.name, props: Box::new(props) });
+        }
         self.apply(id, Edit::Batch { label: "Detect form fields".into(), edits })?;
         Ok(names)
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+
+    /// A long run of underscores (a form's blank) is read in one pass: each glyph is compared with
+    /// the word so far without reading the word again.
+    #[test]
+    fn a_long_underscore_run_is_read_in_one_pass() {
+        let n = 10_000;
+        let glyph = |i: usize, t: &str| pdfcraft_render::TextGlyph {
+            text: t.into(),
+            rect: [i as f32, 0.0, i as f32 + 1.0, 10.0],
+            quad: [[0.0; 2]; 4],
+            direction: [1.0, 0.0],
+        };
+        let mut glyphs: Vec<_> = (0..n).map(|i| glyph(i, "_")).collect();
+        glyphs.push(glyph(n, "x"));
+        let text = pdfcraft_render::PageText { line_of: vec![0; glyphs.len()], space_before: vec![false; glyphs.len()], glyphs };
+        UNDERSCORE_CHARS_READ.with(|c| c.set(0));
+        let words = words_with(&text, |x, y| [x, y]);
+        assert_eq!(words.iter().map(|(w, _)| w.len()).collect::<Vec<_>>(), [n, 1]);
+        let read = UNDERSCORE_CHARS_READ.with(std::cell::Cell::get);
+        assert!(read <= 4 * n, "{read} characters read for {n} glyphs");
+    }
+
+    #[test]
+    fn duplicate_field_names_diff_against_first_original() {
+        let first = pdfcraft_js::FieldState::new("duplicate", pdfcraft_js::FieldType::Text, vec!["first".into()]);
+        let mut second = first.clone();
+        second.value = vec!["second".into()];
+        second.display = pdfcraft_js::DISPLAY_HIDDEN;
+        let before = vec![first.clone(), second.clone()];
+        assert!(changes(&before, std::slice::from_ref(&first)).is_empty());
+        let actual = changes(&before, std::slice::from_ref(&second));
+        assert_eq!(
+            actual,
+            vec![FieldChange {
+                name: "duplicate".into(),
+                value: Some(second.value),
+                display: Some(pdfcraft_js::DISPLAY_HIDDEN),
+                ..Default::default()
+            }]
+        );
+        let outcome = pdfcraft_js::run_shared(
+            "event.value = getField('duplicate').value; getField('duplicate').value = 'updated';",
+            &pdfcraft_js::Event::field("Calculate", "duplicate", ""),
+            &pdfcraft_js::DocInfo::default(),
+            std::sync::Arc::new(before.clone()),
+            &[],
+            Limits::default(),
+        );
+        assert_eq!(outcome.error, None);
+        assert_eq!(outcome.value, "first");
+        assert_eq!(outcome.changed.len(), 1);
+        assert_eq!(
+            changes(&before, &outcome.changed),
+            vec![FieldChange { name: "duplicate".into(), value: Some(vec!["updated".into()]), ..Default::default() }]
+        );
+        assert!(changes(&before, &[]).is_empty());
+        let mut missing = first;
+        missing.name = "missing".into();
+        assert!(changes(&before, &[missing]).is_empty());
     }
 }

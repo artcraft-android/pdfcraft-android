@@ -587,9 +587,9 @@
     <string name="sign_email_hint">name@example.com</string>
     <string name="sign_section_organisation">Organisation (optional)</string>
     <string name="sign_organisation_hint">Company or organisation</string>
-    <string name="sign_password_hint">At least 6 characters</string>
+    <string name="sign_password_hint">At least 8 characters</string>
     <string name="sign_password_again">The password again</string>
-    <string name="sign_password_short">The password needs at least 6 characters.</string>
+    <string name="sign_password_short">The password needs at least 8 characters.</string>
     <string name="sign_password_mismatch">The passwords don\'t match.</string>
     <string name="sign_password_note">PdfCraft doesn\'t keep the password and can\'t recover it: you type it each time you sign.</string>
 

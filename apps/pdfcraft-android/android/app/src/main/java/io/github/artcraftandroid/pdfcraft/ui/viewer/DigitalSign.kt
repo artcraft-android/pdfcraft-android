@@ -414,11 +414,11 @@ fun CreateIdScreen(vm: AppViewModel) {
     var again by remember { mutableStateOf("") }
     val problem = when {
         name.isBlank() -> null
-        password.isNotEmpty() && password.length < 6 -> stringResource(R.string.sign_password_short)
+        password.isNotEmpty() && password.length < 8 -> stringResource(R.string.sign_password_short)
         again.isNotEmpty() && again != password -> stringResource(R.string.sign_password_mismatch)
         else -> null
     }
-    val ok = name.isNotBlank() && password.length >= 6 && again == password
+    val ok = name.isNotBlank() && password.length >= 8 && again == password
     Column(Modifier.fillMaxSize().background(c.surface).pointerInput(Unit) { detectTapGestures() }.safeTopPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { vm.idCreate = false }) { Text(stringResource(R.string.common_cancel), color = c.accent) }

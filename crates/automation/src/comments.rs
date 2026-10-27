@@ -173,8 +173,7 @@ impl Automation {
         let only = a.opt_int("page")?.map(|p| (p.max(1) - 1) as usize);
         let all = self.comments(a)?;
         let view = |c: &Annotation| -> Value {
-            let p = &doc.info.pages[c.page.min(doc.info.pages.len().saturating_sub(1))];
-            json!({
+            let mut v = json!({
                 "id": c.name,
                 "page": c.page + 1,
                 "index": c.index + 1,
@@ -182,9 +181,20 @@ impl Automation {
                 "author": c.author,
                 "contents": c.contents,
                 "modified": c.modified,
-                "rect": rect_to_view(p, c.rect),
+                // Unchanged on a page the viewer could not read (#2660), as `doc_info` reports it.
+                "rect": crate::view_rect(&doc.info, c.page, c.rect),
                 "color": c.color.map(hex),
-            })
+            });
+            // A line's ends, or the corners of connected lines, a polygon or a cloud, as
+            // comment_edit's `points` takes them.
+            // Unchanged on a page the viewer could not read, as `rect` is.
+            if !c.points.is_empty() {
+                let round = |v: f32| (v * 100.0).round() / 100.0;
+                let page = doc.info.pages.get(c.page);
+                v["points"] =
+                    json!(c.points.iter().map(|q| page.map_or([q[0], q[1]], |p| p.user_to_view(q[0], q[1])).map(round)).collect::<Vec<_>>());
+            }
+            v
         };
         let roots: Vec<Value> = all
             .iter()
@@ -484,6 +494,14 @@ impl Automation {
         if sensitivity.is_some() && !scan {
             return Err(ToolError::InvalidArgs("sensitivity is only for scan: true".into()));
         }
+        let requested_size = a.opt_num("font_size")?;
+        if requested_size.is_some() && !matches!(kind, "text" | "date") {
+            return Err(ToolError::InvalidArgs("font_size is only for type text or date".into()));
+        }
+        let size = requested_size.unwrap_or(10.0);
+        if !(4.0..=300.0).contains(&size) {
+            return Err(ToolError::InvalidArgs("font_size must be 4–300 pt".into()));
+        }
         if let Some(path) = a.opt_str("path")? {
             if !matches!(kind, "signature" | "initials") || a.opt_str("text")?.is_some() {
                 return Err(ToolError::InvalidArgs("path is only for an image signature or initials; pass either path or text".into()));
@@ -507,12 +525,12 @@ impl Automation {
             let edit = image.edit(page, &info, at, kind == "initials", &author).ok_or_else(|| ToolError::InvalidArgs("at must be finite".into()))?;
             return self.apply(a, edit);
         }
-        let size = 10.0;
         let text_at = |t: &str| {
             // Measured as the appearance draws it (in Inter when the standard fonts can't hold it).
             let w = (pdfcraft_engine::annot_text::text_measure(t)(t, size) + 8.0).clamp(20.0, 600.0);
             let h = size * 1.2 + 6.0;
-            Shape::Typewriter { rect: [at[0], at[1] - h, at[0] + w, at[1]], font_size: size }
+            let rect = pdfcraft_engine::text_box_at(i64::from(info.rotation), at, w, h).unwrap_or([at[0], at[1] - h, at[0] + w, at[1]]);
+            Shape::Typewriter { rect, font_size: size }
         };
         let (shape, contents) = match kind {
             "text" => {
@@ -551,8 +569,7 @@ impl Automation {
                     "line" => FillMark::Line,
                     other => return Err(ToolError::InvalidArgs(format!("unknown type {other:?}"))),
                 };
-                let (w, h) = if mark == FillMark::Line { (36.0, 4.0) } else { (12.0, 12.0) };
-                (Shape::Mark { rect: [at[0] - w / 2.0, at[1] - h / 2.0, at[0] + w / 2.0, at[1] + h / 2.0], mark }, String::new())
+                (Shape::Mark { rect: mark.rect_at(at, i64::from(info.rotation)), mark }, String::new())
             }
         };
         let style = Style::default_for(&shape);
@@ -589,7 +606,10 @@ impl Automation {
     pub(crate) fn comments_hide(&mut self, a: &Args) -> Result<Value> {
         let id = self.doc(a)?.id;
         let hidden = a.opt_bool("hidden")?.unwrap_or(true);
-        self.session.set_hide_comments(id, hidden);
+        if self.session.set_hide_comments(id, hidden) {
+            // The cached renderer drew with the old setting; page_render must read it again.
+            self.renderers.remove(&id);
+        }
         Ok(json!({ "hidden": hidden }))
     }
 
@@ -619,6 +639,12 @@ impl Automation {
             let fill = if f.eq_ignore_ascii_case("none") { None } else { Some(parse_color(f)?) };
             edits.push(Edit::FillAnnotation { page, index, fill });
         }
+        if let Some(size) = a.opt_num("font_size")? {
+            if !(1.0..=400.0).contains(&size) {
+                return Err(ToolError::InvalidArgs("font_size must be 1–400 pt".into()));
+            }
+            edits.push(Edit::FontSizeAnnotation { page, index, size });
+        }
         if let Some(r) = a.nums::<4>("rect")? {
             edits.push(Edit::ResizeAnnotation { page, index, rect: rect_to_user(&info, r) });
         }
@@ -626,8 +652,23 @@ impl Automation {
             let (o, d) = (to_user(&info, 0.0, 0.0), to_user(&info, dx, dy));
             edits.push(Edit::MoveAnnotation { page, index, dx: d[0] - o[0], dy: d[1] - o[1] });
         }
+        if let Some(pts) = a.get("points") {
+            let wrong = || ToolError::InvalidArgs("points must be an array of [x, y] points (a line's two ends, or every corner)".into());
+            let points = pts
+                .as_array()
+                .ok_or_else(wrong)?
+                .iter()
+                .map(|p| match p.as_array().map(|p| p.iter().map(|v| v.as_f64()).collect::<Vec<_>>()).as_deref() {
+                    Some([Some(x), Some(y)]) => Ok(to_user(&info, *x, *y)),
+                    _ => Err(wrong()),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            edits.push(Edit::ReshapeAnnotation { page, index, points });
+        }
         if edits.is_empty() {
-            return Err(ToolError::InvalidArgs("nothing to change: pass contents, color, opacity, width, rect or move".into()));
+            return Err(ToolError::InvalidArgs(
+                "nothing to change: pass contents, color, opacity, width, fill, font_size, rect, move or points".into(),
+            ));
         }
         let edit = if edits.len() == 1 { edits.remove(0) } else { Edit::Batch { label: "Edit comment".into(), edits } };
         self.apply(a, edit)

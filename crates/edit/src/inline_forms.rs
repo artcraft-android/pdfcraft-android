@@ -811,7 +811,8 @@ impl<'a> Planner<'a> {
 /// The page's text-bearing forms inlined, or `None` when it has none (or none can be).
 pub(crate) fn plan(doc: &Document, page: usize) -> Option<Plan> {
     let p = pdfcraft_model::pages(doc).into_iter().nth(page)?;
-    let streams = crate::text::content_streams(doc, &p.dict);
+    // A page past its decode budget is left as it is (reading it refuses it anyway).
+    let streams = crate::text::content_streams(doc, &p.dict).ok()?;
     // Most pages draw no XObject at all.
     if !streams.iter().any(|(_, d)| d.windows(2).any(|w| w == b"Do")) {
         return None;

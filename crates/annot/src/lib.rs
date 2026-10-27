@@ -26,7 +26,8 @@ mod tests;
 pub enum AnnotError {
     #[error("the document has no page tree")]
     NoPageTree,
-    #[error("page {0} does not exist")]
+    /// Holds the 0-based index; the message names the 1-based page a user counts (#1550).
+    #[error("page {} does not exist", .0.saturating_add(1))]
     NoSuchPage(usize),
     #[error("there is no comment {index} on page {page}")]
     NoSuchAnnotation { page: usize, index: usize },
@@ -123,6 +124,14 @@ impl FillMark {
             FillMark::Dot => "Dot",
             FillMark::Line => "Line",
         }
+    }
+
+    /// The user-space box of the mark placed at `at` on a page turned by `rotation`: centred
+    /// there and sized in displayed axes, so a line runs across the page as displayed (#2392).
+    pub fn rect_at(self, at: [f64; 2], rotation: i64) -> [f64; 4] {
+        let (w, h) = if self == FillMark::Line { (36.0, 4.0) } else { (12.0, 12.0) };
+        let (w, h) = if matches!(rotation.rem_euclid(360), 90 | 270) { (h, w) } else { (w, h) };
+        [at[0] - w / 2.0, at[1] - h / 2.0, at[0] + w / 2.0, at[1] + h / 2.0]
     }
 }
 
@@ -385,7 +394,7 @@ pub enum Shape {
         by: Option<String>,
     },
     /// A typed signature or initials: filled outlines (each contour as points normalised to
-    /// `rect`, 0–1, y up), drawn with the even-odd rule.
+    /// `rect`, 0–1, y up), drawn with the non-zero winding rule.
     TypedSignature {
         rect: [f64; 4],
         contours: Vec<Vec<[f64; 2]>>,
@@ -660,25 +669,65 @@ impl ReviewState {
 pub fn page_refs(doc: &Document) -> Result<Vec<ObjRef>, AnnotError> {
     let root = doc.root().ok_or(AnnotError::NoPageTree)?;
     let pages = doc.get(root).as_dict().and_then(|d| d.reference(b"Pages")).ok_or(AnnotError::NoPageTree)?;
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut stack = vec![pages];
-    while let Some(node) = stack.pop() {
-        if !seen.insert(node) || seen.len() > 1_000_000 {
-            continue;
-        }
-        let obj = doc.get(node);
-        let Some(d) = obj.as_dict() else { continue };
-        match d.get(b"Kids").map(|k| doc.resolve(k)) {
-            Some(kids) if d.name(b"Type") != Some(b"Page") => {
-                if let Some(a) = kids.as_array() {
-                    stack.extend(a.iter().rev().filter_map(|k| k.as_ref()));
-                }
-            }
-            _ => out.push(node),
-        }
+    Ok(PageWalk::new(doc, pages).collect())
+}
+
+/// Depth-first walk over the leaf pages under `top`. It keeps one cursor per open `/Kids` array,
+/// never one entry per child, so a child listed many times or shared between nodes is skipped by
+/// the seen check without being queued first (`pdfcraft_model::pages` walks the same way).
+/// Cycles end at the seen check, a `/Kids` array object shared by several nodes is read once,
+/// and at most a million nodes and four million `/Kids` entries are read.
+struct PageWalk<'a> {
+    doc: &'a Document,
+    seen: std::collections::HashSet<ObjRef>,
+    pending: Vec<(std::sync::Arc<Object>, usize)>,
+    /// `/Kids` entries read so far.
+    examined: usize,
+}
+
+impl<'a> PageWalk<'a> {
+    fn new(doc: &'a Document, top: ObjRef) -> Self {
+        let top = std::sync::Arc::new(Object::Array(vec![Object::Ref(top)]));
+        Self { doc, seen: Default::default(), pending: vec![(top, 0)], examined: 0 }
     }
-    Ok(out)
+}
+
+impl Iterator for PageWalk<'_> {
+    type Item = ObjRef;
+
+    fn next(&mut self) -> Option<ObjRef> {
+        while let Some((kids, next)) = self.pending.last_mut() {
+            let Some(kid) = kids.as_array().and_then(|a| a.get(*next)) else {
+                self.pending.pop();
+                continue;
+            };
+            let node = kid.as_ref();
+            *next += 1;
+            self.examined += 1;
+            let Some(node) = node else { continue };
+            if self.seen.len() >= 1_000_000 || self.examined > 4_000_000 {
+                self.pending.clear();
+                return None;
+            }
+            if !self.seen.insert(node) {
+                continue;
+            }
+            let obj = self.doc.get(node);
+            let Some(d) = obj.as_dict() else { continue };
+            match d.get(b"Kids") {
+                // A `/Kids` array object shared by several nodes is read under the first: under
+                // the others it would only list nodes already seen.
+                Some(Object::Ref(array)) if d.name(b"Type") != Some(b"Page") => {
+                    if self.seen.insert(*array) {
+                        self.pending.push((self.doc.get(*array), 0));
+                    }
+                }
+                Some(kids) if d.name(b"Type") != Some(b"Page") => self.pending.push((self.doc.resolve(kids), 0)),
+                _ => return Some(node),
+            }
+        }
+        None
+    }
 }
 
 fn page_ref(doc: &Document, page: usize) -> Result<ObjRef, AnnotError> {
@@ -689,7 +738,16 @@ fn page_ref(doc: &Document, page: usize) -> Result<ObjRef, AnnotError> {
 fn annots(doc: &Document, page: ObjRef) -> Vec<Object> {
     let obj = doc.get(page);
     let Some(a) = obj.as_dict().and_then(|d| d.get(b"Annots")) else { return Vec::new() };
-    doc.resolve(a).as_array().cloned().unwrap_or_default()
+    let list = doc.resolve(a).as_array().cloned().unwrap_or_default();
+    #[cfg(test)]
+    ANNOTS_ENTRIES_COPIED.with(|n| n.set(n.get() + list.len()));
+    list
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Entries copied out of pages' `/Annots` arrays.
+    static ANNOTS_ENTRIES_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Replace a page's `/Annots`, writing into the shared array object when it is indirect.
@@ -810,6 +868,27 @@ pub fn picture_rotation(doc: &Document, page: usize, index: usize) -> Result<i64
     let list = annots(doc, p);
     let entry = list.get(index).ok_or(AnnotError::NoSuchAnnotation { page, index })?;
     Ok(doc.resolve(entry).as_dict().map_or(0, appearance::picture_turn))
+}
+
+/// Leave page `page` of (a copy of) a document showing only its annotation at `index`, without
+/// the page's content or other annotations, so a render draws that annotation alone: to lay it
+/// over the page while it is dragged. `false`, with `doc` unchanged, when the annotation has no
+/// normal appearance (`/AP /N`) for that render to draw.
+pub fn isolate_annotation(doc: &mut Document, page: usize, index: usize) -> Result<bool, AnnotError> {
+    let p = page_ref(doc, page)?;
+    let entry = annots(doc, p).get(index).cloned().ok_or(AnnotError::NoSuchAnnotation { page, index })?;
+    let has_normal = {
+        let obj = doc.resolve(&entry);
+        obj.as_dict().and_then(|d| d.get(b"AP")).is_some_and(|ap| doc.resolve(ap).as_dict().is_some_and(|ap| ap.contains(b"N")))
+    };
+    if !has_normal {
+        return Ok(false);
+    }
+    set_annots(doc, p, vec![entry])?;
+    doc.update_dict(p, |d| {
+        d.remove(b"Contents");
+    })?;
+    Ok(true)
 }
 
 // ── building ────────────────────────────────────────────────────────────────────────────────
@@ -1091,6 +1170,11 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             d.set(b"C".to_vec(), rgb(style.color));
             d.set(b"Name".to_vec(), Object::name(mark.name()));
             border(&mut d);
+            // Drawn upright for the page as displayed, as a stamp is (#2392).
+            let turn = pdfcraft_model::pages(doc).get(new.page).map_or(0, |p| p.rotation(doc));
+            if matches!(turn, 90 | 180 | 270) {
+                d.set(b"PCStampRotate".to_vec(), Object::Int(turn));
+            }
         }
         Shape::Stamp { stamp, by, .. } => {
             d.set(b"C".to_vec(), rgb(style.color));
@@ -1100,6 +1184,11 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             d.set(b"PCStamp".to_vec(), Object::Bool(true));
             if let Some(b) = by {
                 d.set(b"PCByLine".to_vec(), PdfString::text(b));
+            }
+            // The label is drawn for the page as displayed. A later page rotation is a new edit.
+            let turn = pdfcraft_model::pages(doc).get(new.page).map_or(0, |p| p.rotation(doc));
+            if matches!(turn, 90 | 180 | 270) {
+                d.set(b"PCStampRotate".to_vec(), Object::Int(turn));
             }
         }
         Shape::TypedSignature { contours, .. } => {
@@ -1230,6 +1319,13 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             }
             border(&mut d);
             rich_text(&mut d);
+            // The text is laid out for the page as displayed, like a stamp's label.
+            if !matches!(new.shape, Shape::Callout { .. }) {
+                let turn = pdfcraft_model::pages(doc).get(new.page).map_or(0, |p| p.rotation(doc));
+                if matches!(turn, 90 | 180 | 270) {
+                    d.set(b"PCTextRotate".to_vec(), Object::Int(turn));
+                }
+            }
         }
         _ => {}
     }
@@ -1266,8 +1362,9 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
     Ok(index)
 }
 
-/// Counterrotate a newly placed image stamp's appearance into displayed-page axes.
-/// The normal appearance's transformed bounding box is fitted to `/Rect` by PDF viewers.
+/// Counterrotate a newly placed picture stamp's appearance into displayed-page axes.
+/// The picture may be an image or a PDF page. The normal appearance's transformed bounding
+/// box is fitted to `/Rect` by PDF viewers.
 pub fn orient_image_stamp(doc: &mut Document, page: usize, index: usize, rotation: i64) -> Result<(), AnnotError> {
     let matrix = match rotation {
         90 => [0.0, 1.0, -1.0, 0.0, 0.0, 0.0],
@@ -1277,8 +1374,8 @@ pub fn orient_image_stamp(doc: &mut Document, page: usize, index: usize, rotatio
     };
     let (_, r) = annot_ref(doc, page, index)?;
     let d = annot_dict(doc, r);
-    if d.name(b"Subtype") != Some(b"Stamp") || !matches!(d.get(b"PCPictureImage"), Some(Object::Bool(true))) {
-        return Err(AnnotError::Invalid("only an image stamp can be oriented".into()));
+    if d.name(b"Subtype") != Some(b"Stamp") || d.get(b"PCPicture").is_none() {
+        return Err(AnnotError::Invalid("only a picture stamp can be oriented".into()));
     }
     let normal = d
         .get(b"AP")
@@ -1293,6 +1390,21 @@ pub fn orient_image_stamp(doc: &mut Document, page: usize, index: usize, rotatio
     Ok(())
 }
 
+/// A comment another program drew, whose text the standard fonts can't draw. Redrawing it would
+/// replace those characters with `?`, so the edit is refused before the dictionary changes.
+fn refuse_foreign_text(doc: &Document, d: &Dict) -> Result<(), AnnotError> {
+    let drawn_elsewhere =
+        d.get(b"AP").is_some_and(|ap| doc.resolve(ap).as_dict().is_some_and(|ap| ap.contains(b"N"))) && pdfcraft_fonts::undrawn_mark(d).is_none();
+    if drawn_elsewhere && let Some((what, c)) = appearance::undrawable_text(d) {
+        return Err(AnnotError::Undrawable(format!(
+            "PdfCraft can't redraw this comment: the standard fonts can't draw \"{}\" (U+{:04X}) in {what}, which would then show as ? (the comment was left as it is)",
+            c.escape_debug(),
+            u32::from(c)
+        )));
+    }
+    Ok(())
+}
+
 /// (Re)generate `/AP /N` for the annotation `r` from its dictionary, for an edit that keeps its
 /// text (a restyle, a new size or colour).
 ///
@@ -1301,17 +1413,17 @@ pub fn orient_image_stamp(doc: &mut Document, page: usize, index: usize, rotatio
 /// their place, so the edit is refused (`AnnotError::Undrawable`). One PdfCraft drew with `?`
 /// (marked `pdfcraft_fonts::UNDRAWN_MARK`) is redrawn.
 pub fn set_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
-    let d = annot_dict(doc, r);
-    let drawn_elsewhere =
-        d.get(b"AP").is_some_and(|ap| doc.resolve(ap).as_dict().is_some_and(|ap| ap.contains(b"N"))) && pdfcraft_fonts::undrawn_mark(&d).is_none();
-    if drawn_elsewhere && let Some((what, c)) = appearance::undrawable_text(&d) {
-        return Err(AnnotError::Undrawable(format!(
-            "PdfCraft can't redraw this comment: the standard fonts can't draw \"{}\" (U+{:04X}) in {what}, which would then show as ? (the comment was left as it is)",
-            c.escape_debug(),
-            u32::from(c)
-        )));
-    }
+    refuse_foreign_text(doc, &annot_dict(doc, r))?;
     draw_appearance(doc, r)
+}
+
+/// Put `before` back when redrawing fails, so a refused edit does not keep the new rectangle or style.
+fn redraw_or_restore(doc: &mut Document, r: ObjRef, before: Dict) -> Result<(), AnnotError> {
+    if let Err(e) = set_appearance(doc, r) {
+        doc.set(r, Object::Dict(before));
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Draw `r`'s normal appearance from its dictionary, whatever its text: characters the standard
@@ -1330,8 +1442,8 @@ fn draw_appearance(doc: &mut Document, r: ObjRef) -> Result<(), AnnotError> {
 /// Pure from the dictionary and the objects it points at, so [`AppearanceCache`] can reuse it.
 fn build_appearance(doc: &Document, d: &Dict) -> Option<Stream> {
     let mut stream = appearance::build(d)?;
-    // Image stamp restyling must retain the placement's page-axis correction.
-    if matches!(d.get(b"PCPictureImage"), Some(Object::Bool(true))) {
+    // Picture-stamp restyling must retain the placement's page-axis correction.
+    if d.get(b"PCPicture").is_some() {
         let matrix = d.get(b"AP").and_then(|ap| {
             let ap = doc.resolve(ap);
             let normal = doc.resolve(ap.as_dict()?.get(b"N")?);
@@ -1356,8 +1468,22 @@ fn apply_appearance(doc: &mut Document, r: ObjRef, d: &Dict, stream: Stream) -> 
     apd.remove(b"D");
     apd.remove(b"R");
     apd.set(b"N".to_vec(), Object::Ref(ap));
+    // A note icon has a fixed size (`NOTE_SIZE`); viewers draw it at the upper-left corner of `/Rect`.
+    // The appearance's box is mapped onto `/Rect`, so any other `/Rect` (a large one, or one with
+    // no width, as LaTeX `pdfcomment` writes) would stretch the icon or shrink it to nothing.
+    let icon_rect = matches!(d.name(b"Subtype"), Some(b"Text" | b"FileAttachment"))
+        .then(|| d.get(b"Rect")?.as_array()?.iter().map(|o| o.as_f64()).collect::<Option<Vec<f64>>>())
+        .flatten()
+        .filter(|q| q.len() == 4 && finite(q))
+        .map(|q| {
+            let (x, top) = (q[0].min(q[2]), q[1].max(q[3]));
+            [x, top - NOTE_SIZE, x + NOTE_SIZE, top]
+        });
     doc.update_dict(r, |d| {
         d.set(b"AP".to_vec(), Object::Dict(apd));
+        if let Some(rect) = icon_rect {
+            d.set(b"Rect".to_vec(), num_array(&rect));
+        }
         d.remove(b"AS");
         pdfcraft_fonts::set_undrawn_mark(d, missing);
     })?;
@@ -1434,8 +1560,15 @@ pub fn with_missing_appearances(doc: &Document) -> Option<Document> {
 /// redrawing it. See [`AppearanceCache`] for when entries stay valid.
 pub fn with_missing_appearances_cached(doc: &Document, cache: &mut AppearanceCache) -> Option<Document> {
     let mut copy: Option<Document> = None;
+    // An annotation listed more than once, on one page or several, is drawn once. `has_normal`
+    // reads `doc`, which never gets the appearance, so every repeat used to add another stream to
+    // the copy, and the display bytes grew with the number of listings.
+    let mut seen = std::collections::HashSet::new();
     for page in page_refs(doc).ok()? {
         for r in annots(doc, page).iter().filter_map(Object::as_ref) {
+            if !seen.insert(r) {
+                continue;
+            }
             let d = annot_dict(doc, r);
             if matches!(d.name(b"Subtype"), None | Some(b"Link" | b"Widget" | b"Popup")) {
                 continue;
@@ -1777,6 +1910,48 @@ pub fn set_rect(doc: &mut Document, page: usize, index: usize, rect: [f64; 4], m
     apply_text_box(doc, r, rect, meta, false)
 }
 
+/// At most this many points reshape a comment (a drawn polygon has a handful).
+const MAX_POINTS: usize = 100_000;
+
+/// Reshape a line, connected lines, a polygon or a cloud: its points in user space (a line's two
+/// ends, the others' corners), as dragging the comment's handles sets them. `/Rect` follows the
+/// points with room for the line's width and endings, as when the comment was drawn, and the
+/// appearance is redrawn. A measurement keeps the points it measured.
+pub fn set_points(doc: &mut Document, page: usize, index: usize, points: &[[f64; 2]], meta: &Meta) -> Result<(), AnnotError> {
+    let (_, r) = annot_ref(doc, page, index)?;
+    unlocked(doc, r)?;
+    let d = annot_dict(doc, r);
+    if d.contains(b"Measure") {
+        return Err(AnnotError::Invalid("a measurement's points are where it measured".into()));
+    }
+    if points.len() > MAX_POINTS {
+        return Err(AnnotError::Invalid(format!("at most {MAX_POINTS} points")));
+    }
+    let style = Style { width: border_width_of(&d), ..Style::default() };
+    let ends = line_endings_of(&d).unwrap_or_default();
+    let (start, end) = (ends.first().copied().unwrap_or(LineEnding::None), ends.get(1).copied().unwrap_or(LineEnding::None));
+    let subtype = String::from_utf8_lossy(d.name(b"Subtype").unwrap_or_default()).into_owned();
+    let (shape, key): (Shape, &[u8]) = match (subtype.as_str(), points) {
+        ("Line", [from, to]) => (Shape::Line { from: *from, to: *to, start, end }, b"L"),
+        ("Line", _) => return Err(AnnotError::Invalid("a line has two ends".into())),
+        ("PolyLine", _) => (Shape::PolyLine { vertices: points.to_vec(), start, end }, b"Vertices"),
+        ("Polygon", _) => {
+            let cloud = d.get(b"BE").and_then(|b| b.as_dict()).is_some_and(|b| b.name(b"S") == Some(b"C"));
+            (Shape::Polygon { vertices: points.to_vec(), cloud }, b"Vertices")
+        }
+        (other, _) => return Err(AnnotError::Invalid(format!("{other} comments have no points to move"))),
+    };
+    // Checks the points too: finite, and far enough apart to draw.
+    let rect = rect_for(&shape, &style)?;
+    let before = d;
+    doc.update_dict(r, |d| {
+        d.set(key.to_vec(), num_array(&points.concat()));
+        d.set(b"Rect".to_vec(), num_array(&rect));
+        touch(d, meta);
+    })?;
+    redraw_or_restore(doc, r, before)
+}
+
 /// Scale a drawing's strokes into `rect`. The margin between the strokes and the old `/Rect` (half
 /// the line width and a little more) stays the same on each side, so the line isn't clipped.
 fn resize_ink(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta) -> Result<(), AnnotError> {
@@ -1814,13 +1989,13 @@ fn resize_ink(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta) -> Res
             s.iter().map(|p| [axis(p[0], inner[0], inner[2], target[0], target[2]), axis(p[1], inner[1], inner[3], target[1], target[3])]).collect()
         })
         .collect();
+    let before = annot_dict(doc, r);
     doc.update_dict(r, |d| {
         d.set(b"InkList".to_vec(), Object::Array(scaled.iter().map(|s| num_array(&s.concat())).collect()));
         d.set(b"Rect".to_vec(), num_array(&rect));
         touch(d, meta);
     })?;
-    set_appearance(doc, r)?;
-    Ok(())
+    redraw_or_restore(doc, r, before)
 }
 
 /// Store `rect` as a FreeText annotation's text box (or a square's/oval's rectangle): a callout's
@@ -1832,6 +2007,9 @@ fn apply_text_box(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta, ne
         return Err(AnnotError::Invalid("invalid rectangle (too small)".into()));
     }
     let d = annot_dict(doc, r);
+    if !new_text {
+        refuse_foreign_text(doc, &d)?;
+    }
     // A callout's rectangle is its text box: the leader line re-attaches and `/Rect` grows to hold it.
     let callout = d.get(b"CL").and_then(|o| o.as_array()).map(|a| a.iter().filter_map(|x| x.as_f64()).collect::<Vec<f64>>()).filter(|l| l.len() == 6);
     let (outer, cl) = match callout {
@@ -1857,7 +2035,16 @@ fn apply_text_box(doc: &mut Document, r: ObjRef, rect: [f64; 4], meta: &Meta, ne
         }
         touch(d, meta);
     })?;
-    if new_text { draw_appearance(doc, r) } else { set_appearance(doc, r) }
+    let before = d;
+    if new_text {
+        if let Err(e) = draw_appearance(doc, r) {
+            doc.set(r, Object::Dict(before));
+            return Err(e);
+        }
+        Ok(())
+    } else {
+        redraw_or_restore(doc, r, before)
+    }
 }
 
 fn border_width_of(d: &Dict) -> f64 {
@@ -1894,7 +2081,9 @@ pub fn set_style(
             return Err(AnnotError::Invalid("this comment has no line endings to change".into()));
         }
     }
+    refuse_foreign_text(doc, &d)?;
     let free_text = subtype == "FreeText";
+    let before = d;
     doc.update_dict(r, |d| {
         if let Some(c) = color {
             if free_text {
@@ -1932,16 +2121,56 @@ pub fn set_style(
         ensure_ending_room(d);
         touch(d, meta);
     })?;
-    set_appearance(doc, r)
+    redraw_or_restore(doc, r, before)
 }
 
-/// Whether a comment of this subtype has an interior that can be filled (`/IC`: rectangles,
-/// ovals, polygons and clouds, §12.5.6.8–9).
+/// Change the font size of a text box, typewriter text or callout (`/DA` keeps its colour; the
+/// rich-text strings follow) and redraw it. The box grows to hold the wrapped text at the new
+/// size and never shrinks, so a box the user drew large stays large. Sizes are 1 to 400 pt.
+pub fn set_font_size(doc: &mut Document, page: usize, index: usize, size: f64, meta: &Meta) -> Result<(), AnnotError> {
+    let (_, r) = annot_ref(doc, page, index)?;
+    unlocked(doc, r)?;
+    let d = annot_dict(doc, r);
+    if d.name(b"Subtype") != Some(b"FreeText") {
+        return Err(AnnotError::Invalid("only text boxes, typewriter text and callouts have a font size".into()));
+    }
+    if !size.is_finite() || !(1.0..=400.0).contains(&size) {
+        return Err(AnnotError::Invalid("font size must be 1\u{2013}400 pt".into()));
+    }
+    refuse_foreign_text(doc, &d)?;
+    let before = d;
+    doc.update_dict(r, |d| {
+        let (col, _) = appearance::parse_da(d);
+        d.set(b"DA".to_vec(), PdfString::literal(format!("{} {} {} rg /Helv {} Tf", n(col[0]), n(col[1]), n(col[2]), n(size)).into_bytes()));
+        rich_text(d);
+        touch(d, meta);
+    })?;
+    let text = text_value(doc, &annot_dict(doc, r), b"Contents").unwrap_or_default();
+    let result = match fitted_box(doc, r, &text) {
+        Some(fit) => {
+            let cur = annot_dict(doc, r);
+            let nums: Vec<f64> =
+                cur.get(b"Rect").and_then(|o| o.as_array()).map(|a| a.iter().filter_map(|x| x.as_f64()).collect()).unwrap_or_default();
+            // Keep the top and sides; only the bottom edge moves, and only downwards.
+            match four(&nums).map(normalize) {
+                Some(old) if !cur.contains(b"CL") => apply_text_box(doc, r, [fit[0], fit[1].min(old[1]), fit[2], fit[3]], meta, false),
+                _ => apply_text_box(doc, r, fit, meta, false),
+            }
+        }
+        None => redraw_or_restore(doc, r, before.clone()),
+    };
+    if result.is_err() {
+        doc.set(r, Object::Dict(before));
+    }
+    result
+}
+
+/// Whether a comment has a fill: `/IC` for shapes, `/C` for FreeText (§12.5.6).
 pub fn fillable(subtype: &str) -> bool {
-    matches!(subtype, "Square" | "Circle" | "Polygon")
+    matches!(subtype, "Square" | "Circle" | "Polygon" | "FreeText")
 }
 
-/// Fill a rectangle, oval or polygon comment with `fill`, or remove its fill (`None`), and
+/// Fill a shape or FreeText comment with `fill`, or remove its fill (`None`), and
 /// redraw its appearance (Acrobat: Properties ▸ Fill Color).
 pub fn set_fill(doc: &mut Document, page: usize, index: usize, fill: Option<Rgb>, meta: &Meta) -> Result<(), AnnotError> {
     let (_, r) = annot_ref(doc, page, index)?;
@@ -1949,7 +2178,7 @@ pub fn set_fill(doc: &mut Document, page: usize, index: usize, fill: Option<Rgb>
     let d = annot_dict(doc, r);
     let subtype = String::from_utf8_lossy(d.name(b"Subtype").unwrap_or_default()).into_owned();
     if !fillable(&subtype) {
-        return Err(AnnotError::Invalid("only rectangles, ovals and polygons can be filled".into()));
+        return Err(AnnotError::Invalid("only rectangles, ovals, polygons and text boxes can be filled".into()));
     }
     // Check before changing anything: a stale appearance would contradict the new fill.
     if appearance::build(&d).is_none() {
@@ -1958,16 +2187,19 @@ pub fn set_fill(doc: &mut Document, page: usize, index: usize, fill: Option<Rgb>
     if fill.is_some_and(|c| !finite(&c)) {
         return Err(AnnotError::Invalid("invalid fill colour".into()));
     }
+    refuse_foreign_text(doc, &d)?;
+    let before = d;
     doc.update_dict(r, |d| {
+        let key: &[u8] = if subtype == "FreeText" { b"C" } else { b"IC" };
         match fill {
-            Some(c) => d.set(b"IC".to_vec(), rgb(c)),
+            Some(c) => d.set(key.to_vec(), rgb(c)),
             None => {
-                d.remove(b"IC");
+                d.remove(key);
             }
         }
         touch(d, meta);
     })?;
-    set_appearance(doc, r)
+    redraw_or_restore(doc, r, before)
 }
 
 /// Grow a line or polyline's rectangle so a non-`None` ending is not clipped. Idempotent.
@@ -2032,6 +2264,9 @@ pub struct Summary {
     pub opacity: f32,
     /// The line width in points: `/BS /W`, else the third number of `/Border`.
     pub width: Option<f32>,
+    /// A line's two ends (`/L`), or the corners of connected lines, a polygon or a cloud
+    /// (`/Vertices`), in user space; empty for other comments.
+    pub points: Vec<[f32; 2]>,
 }
 
 fn text_value(doc: &Document, d: &Dict, key: &[u8]) -> Option<String> {
@@ -2086,6 +2321,12 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 }
             }
             let quads = nums(b"QuadPoints").as_chunks::<8>().0.to_vec();
+            // Keep in step with `pdfcraft_render::inspect`.
+            let points = match subtype.as_str() {
+                "Line" => Some(nums(b"L")).filter(|l| l.len() == 4).map(|l| l.as_chunks::<2>().0.to_vec()).unwrap_or_default(),
+                "PolyLine" | "Polygon" => nums(b"Vertices").as_chunks::<2>().0.to_vec(),
+                _ => Vec::new(),
+            };
             let in_reply_to = d.get(b"IRT").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).and_then(|p| text_value(doc, &p, b"NM"));
             // keep in step with `pdfcraft_render::inspect`
             let opacity = d.get(b"CA").and_then(|o| doc.resolve(o).as_f64()).filter(|v| v.is_finite()).map_or(1.0, |v| v.clamp(0.0, 1.0) as f32);
@@ -2116,6 +2357,7 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 fill_sign: is_fill_sign(doc, d),
                 opacity,
                 width,
+                points,
             });
         }
     }
@@ -2166,7 +2408,7 @@ pub struct Props {
     pub subject: String,
     pub color: Option<Rgb>,
     pub opacity: f64,
-    /// Border / line width, for shapes, lines and drawings.
+    /// Border / line width, for shapes, lines, drawings and text boxes.
     pub width: Option<f64>,
     /// Notes only.
     pub icon: Option<NoteIcon>,
@@ -2178,10 +2420,12 @@ pub struct Props {
     pub locked: bool,
     /// `/LE`: two names for a line or polyline (`None` when unset), one for a callout.
     pub endings: Option<Vec<LineEnding>>,
-    /// Rectangles, ovals and polygons: their interior can be filled (see [`fillable`]).
+    /// Whether the comment has a fill control (see [`fillable`]).
     pub fillable: bool,
-    /// `/IC`, the interior colour (`None`: no fill).
+    /// The interior colour (`None`: no fill).
     pub fill: Option<Rgb>,
+    /// Text boxes, typewriter text and callouts: the `/DA` font size in points.
+    pub font_size: Option<f64>,
 }
 
 /// The current properties of the comment at `(page, index)`.
@@ -2193,8 +2437,13 @@ pub fn props(doc: &Document, page: usize, index: usize) -> Option<Props> {
     let subtype = String::from_utf8_lossy(d.name(b"Subtype")?).into_owned();
     let c: Vec<f64> = d.get(b"C").and_then(|o| o.as_array().map(|a| a.iter().filter_map(|x| x.as_f64()).collect())).unwrap_or_default();
     let color = if subtype == "FreeText" { Some(appearance::parse_da(d).0) } else { (c.len() == 3).then(|| [c[0], c[1], c[2]]) };
-    let width = matches!(subtype.as_str(), "Square" | "Circle" | "Line" | "Ink" | "Polygon" | "PolyLine")
-        .then(|| d.get(b"BS").and_then(|b| b.as_dict()).and_then(|b| b.get(b"W")).and_then(|w| w.as_f64()).unwrap_or(1.0));
+    let width = matches!(subtype.as_str(), "Square" | "Circle" | "Line" | "Ink" | "Polygon" | "PolyLine" | "FreeText").then(|| {
+        if subtype == "FreeText" {
+            if !d.contains(b"BS") && !d.contains(b"Border") { 0.0 } else { appearance::border_width(d) }
+        } else {
+            d.get(b"BS").and_then(|b| b.as_dict()).and_then(|b| b.get(b"W")).and_then(|w| w.as_f64()).unwrap_or(1.0)
+        }
+    });
     Some(Props {
         author: text_value(doc, d, b"T").unwrap_or_default(),
         subject: text_value(doc, d, b"Subj").unwrap_or_default(),
@@ -2207,14 +2456,16 @@ pub fn props(doc: &Document, page: usize, index: usize) -> Option<Props> {
         locked: annotation_flags(doc, d) & FLAG_LOCKED != 0,
         fillable: fillable(&subtype),
         fill: fill_of(d),
+        font_size: (subtype == "FreeText").then(|| appearance::parse_da(d).1),
         subtype,
         endings: line_endings_of(d),
     })
 }
 
-/// `/IC` as an RGB colour. An empty array means no fill; grey and CMYK fills are converted.
+/// A shape’s `/IC` or FreeText `/C` as RGB. Grey and CMYK fills are converted.
 fn fill_of(d: &Dict) -> Option<Rgb> {
-    let c: Vec<f64> = d.get(b"IC")?.as_array()?.iter().filter_map(|x| x.as_f64()).collect();
+    let key: &[u8] = if d.name(b"Subtype") == Some(b"FreeText") { b"C" } else { b"IC" };
+    let c: Vec<f64> = d.get(key)?.as_array()?.iter().filter_map(|x| x.as_f64()).collect();
     let rgb = match c.as_slice() {
         [g] => [*g; 3],
         [r, g, b] => [*r, *g, *b],
@@ -2240,6 +2491,11 @@ fn line_endings_of(d: &Dict) -> Option<Vec<LineEnding>> {
 /// Replace Text (Acrobat's proposal): strike out `quads` and add a caret at the end of the
 /// struck text holding `replacement`, grouped with the strikeout (`/IRT` + `/RT /Group`) so they
 /// move, list and delete as one. Returns the strikeout's index.
+///
+/// The two annotations need their own `/NM`: XFDF names a reply by the `/NM` of what it replies
+/// to, so one id for both writes `inreplyto` equal to the caret's own `name`, and a reader that
+/// resolves names (Acrobat, and our own importer) loses the pair. `caret_meta` is a second id
+/// from the caller, so the edit stays deterministic.
 #[allow(clippy::too_many_arguments)]
 pub fn add_text_replacement(
     doc: &mut Document,
@@ -2250,6 +2506,7 @@ pub fn add_text_replacement(
     strike: &Style,
     caret: &Style,
     meta: &Meta,
+    caret_meta: &Meta,
 ) -> Result<usize, AnnotError> {
     let last = *quads.last().ok_or_else(|| AnnotError::Invalid("select the text to replace first".into()))?;
     let s = add_annotation(
@@ -2275,7 +2532,7 @@ pub fn add_text_replacement(
     let c = add_annotation(
         doc,
         &NewAnnotation { page, shape: Shape::Caret { rect }, style: caret.clone(), contents: replacement.into(), author: author.into() },
-        meta,
+        caret_meta,
     )?;
     let (_, cr) = annot_ref(doc, page, c)?;
     doc.update_dict(cr, |d| {

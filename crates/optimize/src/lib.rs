@@ -1,6 +1,9 @@
 //! The PDF Optimizer (execution plan M11.1; Acrobat: Reduce File Size and Optimize PDF ▸
 //! Advanced optimization).
 //!
+//! - **Merge image fragments:** a page picture some PDF printers draw as thousands of images one
+//!   pixel row high is put back together into one image first (see [`fragments`]), so the image
+//!   settings can work on it.
 //! - **Images:** each image's effective resolution is measured where pages draw it (the
 //!   smallest over its uses, through form XObjects); colour and grayscale images above a
 //!   threshold are resampled (bicubic) to a target resolution and recompressed as JPEG or Flate.
@@ -20,6 +23,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod audit;
+pub mod fragments;
 mod images;
 mod links;
 mod unused;
@@ -45,6 +49,8 @@ pub enum OptimizeError {
 pub enum Stage {
     /// About to process image `done` (0-based) of `total`; `done == total` once all are done.
     Images { done: usize, total: usize },
+    /// Merging the fragments of a page picture into one image (only when a page has some).
+    Fragments,
     /// Discarding objects, cleaning up links and compressing unencoded streams.
     CleanUp,
 }
@@ -73,12 +79,18 @@ pub struct ImageSettings {
 }
 
 impl ImageSettings {
-    /// Reduce File Size: bicubic to 150 ppi above 225 ppi, JPEG medium quality.
+    /// Reduce File Size and the Standard preset: bicubic to 150 ppi above 225 ppi, JPEG medium
+    /// quality.
     pub const REDUCE: ImageSettings = ImageSettings { downsample: true, target_ppi: 150.0, above_ppi: 225.0, compression: Compression::Jpeg(60) };
+    /// The Mobile preset: bicubic to 96 ppi above 144 ppi, JPEG high quality. Pages read on a
+    /// screen; text in scans stays legible.
+    pub const MOBILE: ImageSettings = ImageSettings { downsample: true, target_ppi: 96.0, above_ppi: 144.0, compression: Compression::Jpeg(80) };
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
+    /// Put page pictures drawn as many stacked fragments back together first ([`fragments`]).
+    pub merge_fragments: bool,
     pub color: ImageSettings,
     pub gray: ImageSettings,
     pub discard_thumbnails: bool,
@@ -98,6 +110,7 @@ impl Default for Settings {
     /// Acrobat's Reduce File Size choices.
     fn default() -> Self {
         Self {
+            merge_fragments: true,
             color: ImageSettings::REDUCE,
             gray: ImageSettings::REDUCE,
             discard_thumbnails: true,
@@ -111,9 +124,49 @@ impl Default for Settings {
     }
 }
 
+/// The optimizer's ready-made settings, as in Acrobat's Settings menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preset {
+    /// Reduce File Size's choices ([`Settings::default`]).
+    Standard,
+    /// Smaller files for reading on a phone or screen: images to 96 ppi above 144, JPEG high.
+    Mobile,
+}
+
+impl Preset {
+    pub const ALL: [Preset; 2] = [Preset::Standard, Preset::Mobile];
+
+    /// The name tools use.
+    pub fn name(self) -> &'static str {
+        match self {
+            Preset::Standard => "standard",
+            Preset::Mobile => "mobile",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Preset> {
+        Preset::ALL.into_iter().find(|p| p.name() == name)
+    }
+
+    pub fn settings(self) -> Settings {
+        match self {
+            Preset::Standard => Settings::default(),
+            Preset::Mobile => Settings { color: ImageSettings::MOBILE, gray: ImageSettings::MOBILE, ..Settings::default() },
+        }
+    }
+
+    /// The preset `settings` are, if they are one.
+    pub fn of(settings: &Settings) -> Option<Preset> {
+        Preset::ALL.into_iter().find(|p| p.settings() == *settings)
+    }
+}
+
 /// What an optimization did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Report {
+    /// Images merged from fragments, and how many fragments went into them.
+    pub merged_images: usize,
+    pub fragments_merged: usize,
     pub images: usize,
     pub images_resampled: usize,
     pub images_recompressed: usize,
@@ -144,6 +197,9 @@ pub fn optimize(doc: &mut Document, settings: &Settings) -> Result<Report, Optim
 pub fn optimize_with_progress(doc: &mut Document, settings: &Settings, progress: &mut dyn FnMut(Stage) -> bool) -> Result<Report, OptimizeError> {
     let mut report = Report::default();
     let pages = pdfcraft_annot::page_refs(doc).map_err(|_| OptimizeError::NoPages)?;
+    if settings.merge_fragments {
+        fragments::run(doc, &pages, &mut report, progress)?;
+    }
     images::run(doc, &pages, settings, &mut report, progress)?;
     if !progress(Stage::CleanUp) {
         return Err(OptimizeError::Cancelled);

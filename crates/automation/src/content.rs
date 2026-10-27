@@ -69,13 +69,13 @@ impl Automation {
         let doc = self.doc(a)?;
         let mut per_page: std::collections::HashMap<usize, usize> = Default::default();
         let items: Vec<Value> = doc
-            .added
+            .added()
             .iter()
             .map(|it| {
                 let index = per_page.entry(it.page).or_default();
-                let ph = doc.info.pages[it.page].height as f64;
-                let mut v =
-                    json!({ "page": it.page + 1, "index": *index + 1, "rect": to_view(it.content.rect(), ph).map(|x| (x * 100.0).round() / 100.0) });
+                // Unchanged on a page the viewer could not read (#2660), like `crate::view_rect`.
+                let rect = doc.info.pages.get(it.page).map_or(it.content.rect(), |p| to_view(it.content.rect(), p.height as f64));
+                let mut v = json!({ "page": it.page + 1, "index": *index + 1, "rect": rect.map(|x| (x * 100.0).round() / 100.0) });
                 *index += 1;
                 match &it.content {
                     AddedContent::Text(t) => {
@@ -110,7 +110,7 @@ impl Automation {
         let mut t = AddedText { rect, text: a.str("text")?.to_string(), ..AddedText::default() };
         style(a, &mut t)?;
         let mut out = self.apply(a, Edit::AddText { page, text: t })?;
-        out["index"] = json!(self.doc(a)?.added.iter().filter(|x| x.page == page).count());
+        out["index"] = json!(self.doc(a)?.added().iter().filter(|x| x.page == page).count());
         Ok(out)
     }
 
@@ -123,7 +123,7 @@ impl Automation {
         let rect = rect_arg(a, "rect")?.map(|r| to_display(r, ph));
         let mut out = self.apply(a, Edit::AddImage { page, rect, name, bytes: std::sync::Arc::new(bytes) })?;
         let doc = self.doc(a)?;
-        let mine: Vec<_> = doc.added.iter().filter(|x| x.page == page).collect();
+        let mine: Vec<_> = doc.added().iter().filter(|x| x.page == page).collect();
         out["index"] = json!(mine.len());
         out["rect"] = json!(mine.last().map(|x| to_view(x.content.rect(), ph)));
         Ok(out)
@@ -135,10 +135,10 @@ impl Automation {
         let index = a.int("index")?;
         let ph = doc.info.pages[page].height as f64;
         let it = doc
-            .added
+            .added()
             .iter()
             .filter(|x| x.page == page)
-            .nth((index - 1).max(0) as usize)
+            .nth(usize::try_from(index.saturating_sub(1)).unwrap_or(usize::MAX))
             .filter(|_| index >= 1)
             .ok_or_else(|| failed(format!("page {} has no added item {index} (see content_list)", page + 1)))?;
         Ok((page, index as usize - 1, it.content.clone(), ph))
@@ -164,11 +164,15 @@ impl Automation {
                 if a.get("text").is_some() {
                     return Err(bad("images have no text"));
                 }
+                if ["font", "size", "bold", "italic", "color", "align"].iter().any(|k| a.get(k).is_some()) {
+                    return Err(bad("font, size, bold, italic, color and align apply to text"));
+                }
                 if let Some(deg) = a.opt_int("rotate")? {
                     if deg.rem_euclid(90) != 0 {
                         return Err(bad("rotate must be a multiple of 90"));
                     }
-                    i.rotation = ((i64::from(i.rotation) * 90 + deg).rem_euclid(360) / 90) as u8;
+                    // Reduce untrusted degrees before adding the current quarter turns.
+                    i.rotation = (i64::from(i.rotation) + deg.rem_euclid(360) / 90).rem_euclid(4) as u8;
                 }
                 if a.opt_bool("flip_h")? == Some(true) {
                     i.flip_h = !i.flip_h;

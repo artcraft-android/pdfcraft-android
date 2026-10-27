@@ -53,3 +53,9 @@ Layer L4. Create a PDF (Acrobat's Create a PDF tool), execution plan M10.2:
   recursion is bounded and output is capped at 5 000 pages.
 
 Every function returns a `pdfcraft_cos::Document`; the caller writes it.
+
+Image export and Save Image As apply each lossless image's Decode pair before converting its color components.
+Indexed Decode values select palette entries after rounding and clipping. Color-key masks compare the original samples.
+Missing, null or malformed Decode arrays keep the default mapping.
+The existing 16-bit path still uses each sample's high byte. JPEG and mask Decode handling remain limited.
+ICC transforms and calibrated color conversion remain outside this export path.
