@@ -411,3 +411,33 @@ fn signs_with_a_digital_id_and_trusts_its_signer() {
     assert_eq!(list["signatures"][0]["status"], "valid");
     assert_eq!(list["signatures"][0]["modification"], "allowed");
 }
+
+/// A form's scripts run through the calls the app makes: filling a field recalculates a scripted
+/// total and returns its alert, and a button's script (from `form_actions`) runs with `js_run`.
+#[test]
+fn form_scripts_run_when_fields_are_filled_and_buttons_pressed() {
+    let s = MobileSession::new();
+    let doc = s.open(blank_pdf(1), None).unwrap().id;
+    let run = |tool: &str, args: Value| -> Value { serde_json::from_str(&s.execute(tool.into(), args.to_string()).unwrap()).unwrap() };
+    for (i, name) in ["a", "b", "total"].into_iter().enumerate() {
+        let y = 100 + 30 * i;
+        run("form_add_field", json!({"doc": doc, "page": 1, "type": "text", "rect": [200, y, 360, y + 20], "name": name}));
+    }
+    run("form_add_field", json!({"doc": doc, "page": 1, "type": "button", "rect": [200, 200, 360, 224], "name": "double", "caption": "Double a"}));
+    let sum = "event.value = Number(this.getField(\"a\").value) + Number(this.getField(\"b\").value); if (event.value > 9) app.alert(\"Big\");";
+    run("form_set_script", json!({"doc": doc, "field": "total", "event": "calculate", "script": sum}));
+    let double = "var a = this.getField(\"a\"); a.value = Number(a.value) * 2; app.alert(\"a is now \" + a.value);";
+    run("form_set_script", json!({"doc": doc, "field": "double", "event": "mouse_up", "script": double}));
+    let total = |s: &MobileSession| s.widgets(doc).unwrap().into_iter().find(|w| w.field == "total").and_then(|w| w.value);
+
+    run("form_fill", json!({"doc": doc, "values": {"a": "2"}}));
+    let filled = run("form_fill", json!({"doc": doc, "values": {"b": "3"}}));
+    assert_eq!(total(&s).as_deref(), Some("5"), "{filled}");
+    let actions = run("form_actions", json!({"doc": doc, "field": "double"}));
+    let script = actions["actions"][0]["javascript"].as_str().unwrap().to_owned();
+    let pressed = run("js_run", json!({"doc": doc, "field": "double", "script": script}));
+    assert_eq!(pressed["alerts"], json!(["a is now 4"]), "{pressed}");
+    assert_eq!(total(&s).as_deref(), Some("7"));
+    let big = run("form_fill", json!({"doc": doc, "values": {"b": "8"}}));
+    assert_eq!(big["alerts"], json!(["Big"]), "{big}");
+}

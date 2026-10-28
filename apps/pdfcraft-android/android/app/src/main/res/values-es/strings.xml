@@ -1072,7 +1072,6 @@
     <!-- Messages: forms -->
     <string name="msg_form_cleared">Formulario borrado</string>
     <string name="msg_button_submit">Este botón envía el formulario por internet, algo que PdfCraft no hace.</string>
-    <string name="msg_button_script">Este botón ejecuta un script, algo que PdfCraft no ejecuta.</string>
     <!-- Words remembered from form fields, offered while typing. -->
     <string name="msg_suggestions_cleared">Sugerencias borradas</string>
 

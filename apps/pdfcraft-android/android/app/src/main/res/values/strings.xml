@@ -1073,7 +1073,6 @@
     <!-- Messages: forms -->
     <string name="msg_form_cleared">Form cleared</string>
     <string name="msg_button_submit">This button sends the form online, which PdfCraft doesn\'t do.</string>
-    <string name="msg_button_script">This button runs a script, which PdfCraft doesn\'t run.</string>
     <!-- Words remembered from form fields, offered while typing. -->
     <string name="msg_suggestions_cleared">Suggestions cleared</string>
 

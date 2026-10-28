@@ -56,6 +56,9 @@ data class Message(val text: String, val actionLabel: String? = null, val action
 /** A document waiting for its password before it opens. */
 data class PasswordRequest(val uri: Uri, val file: File, val wrong: Boolean)
 
+/** Script alerts waiting at once, at most. */
+private const val MAX_SCRIPT_ALERTS = 20
+
 /** The app's state: the engine, the open document, Home's lists, and the messages. */
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val application = app as PdfcraftApplication
@@ -1783,8 +1786,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * A form button: does what its release action says, as far as a reader does on a phone:
-     * clear the form (or the fields it names), open a web address after asking, or go to a page.
-     * Scripts and sending the form online aren't run.
+     * clear the form (or the fields it names), open a web address after asking, go to a page, or
+     * run its script. Sending the form online isn't done.
      */
     private fun pressButton(doc: OpenDocument, w: io.github.artcraftandroid.pdfcraft.core.WidgetInfo) {
         val eng = engine ?: return
@@ -1801,13 +1804,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 act.has("url") -> linkPrompt = act.optString("url")
                 act.has("page") -> doc.viewer.goToPage((act.optInt("page") - 1).coerceIn(0, doc.pageCount - 1))
                 act.has("submit") -> tell(text(R.string.msg_button_submit))
-                act.has("javascript") -> tell(text(R.string.msg_button_script))
+                act.has("javascript") -> runTool(doc, "js_run", mapOf("field" to w.field, "script" to act.optString("javascript"))) { scriptOutput(doc, it) }
             }
         }
     }
 
     fun fillField(doc: OpenDocument, field: String, value: Any) {
-        runTool(doc, "form_fill", mapOf("values" to mapOf(field to value)))
+        val eng = engine ?: return
+        viewModelScope.launch {
+            try {
+                val r = eng.tool("form_fill", mapOf("doc" to doc.id, "values" to mapOf(field to value)))
+                refresh(doc)
+                scriptOutput(doc, r)
+            } catch (e: MobileException) {
+                // the field refused the value (its format, or its own script's check): said in a
+                // dialog, in the form's own words
+                showScriptAlert(e.userMessage)
+            }
+        }
+    }
+
+    /** What a form's scripts said (their alerts), shown one at a time. */
+    val scriptAlerts = androidx.compose.runtime.mutableStateListOf<String>()
+
+    private fun showScriptAlert(message: String) {
+        // a script that alerts in a loop can't queue dialogs without end
+        if (message.isNotBlank() && scriptAlerts.size < MAX_SCRIPT_ALERTS) scriptAlerts.add(message)
+    }
+
+    fun dismissScriptAlert() {
+        if (scriptAlerts.isNotEmpty()) scriptAlerts.removeAt(0)
+    }
+
+    /**
+     * What a form's scripts said and asked of the viewer, from a tool's result: alerts are shown, a
+     * page is shown, a web address asks first and printing prints; sending the form online isn't done.
+     */
+    private fun scriptOutput(doc: OpenDocument, r: JSONObject) {
+        // a script that failed: kept out of sight, as the reference keeps it, but in the log
+        r.optString("error").takeIf { it.isNotEmpty() && it != "null" }?.let { android.util.Log.w("PdfCraft", "form script: $it") }
+        r.optJSONArray("alerts")?.let { a -> for (i in 0 until a.length()) showScriptAlert(a.optString(i)) }
+        val requests = r.optJSONArray("requests") ?: return
+        for (i in 0 until requests.length()) {
+            val q = requests.optJSONObject(i) ?: continue
+            when {
+                q.has("page") -> doc.viewer.goToPage((q.optInt("page") - 1).coerceIn(0, doc.pageCount - 1))
+                q.has("url") -> linkPrompt = q.optString("url")
+                q.has("print") -> print(doc)
+                q.has("submit") -> tell(text(R.string.msg_button_submit))
+            }
+        }
     }
 
     /** Move to the next (or previous) fillable text or choice field in reading order. */

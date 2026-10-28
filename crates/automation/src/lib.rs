@@ -1311,6 +1311,15 @@ impl Automation {
         if !doc.edit_notices.is_empty() {
             out["warnings"] = json!(doc.edit_notices.iter().map(ToString::to_string).collect::<Vec<_>>());
         }
+        // What the form's scripts said or asked of the viewer during the edit (a calculation's
+        // alert, a page to show): returned for the front end to show, not left for later.
+        let js = self.session.take_js_output(id);
+        if !js.alerts.is_empty() {
+            out["alerts"] = json!(js.alerts);
+        }
+        if !js.requests.is_empty() {
+            out["requests"] = json!(js.requests.iter().map(a11y::request_json).collect::<Vec<_>>());
+        }
         Ok(out)
     }
 

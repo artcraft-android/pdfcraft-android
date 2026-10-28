@@ -4567,6 +4567,31 @@ fn form_formats_and_calculations_through_tools() {
     ));
 }
 
+/// A fill returns what the form's scripts said and asked for: a calculation's alert and the page
+/// it shows come back with the result, and a value a validate script refuses fails with its alert.
+#[test]
+fn form_fill_returns_what_the_scripts_said() {
+    let dir = workdir("formalerts");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    for (i, name) in ["qty", "total", "age"].into_iter().enumerate() {
+        let y = 20 + 30 * i;
+        ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "rect": [20, y, 180, y + 22], "name": name }));
+    }
+    let discount = "var q = Number(getField(\"qty\").value); if (q > 9) { app.alert(\"Ten or more: ask for a discount.\"); this.pageNum = 0; } event.value = q * 2;";
+    ok(&mut a, "form_set_script", json!({ "doc": doc, "field": "total", "event": "calculate", "script": discount }));
+    let age = "if (Number(event.value) > 120) { app.alert(\"That age is too high.\"); event.rc = false; }";
+    ok(&mut a, "form_set_script", json!({ "doc": doc, "field": "age", "event": "validate", "script": age }));
+    let small = ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "qty": "3" } }));
+    assert!(small.get("alerts").is_none() && small.get("requests").is_none(), "{small}");
+    let big = ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "qty": "12" } }));
+    assert_eq!(big["alerts"], json!(["Ten or more: ask for a discount."]), "{big}");
+    assert_eq!(big["requests"], json!([{ "page": 1 }]), "{big}");
+    let refused = a.call("form_fill", &json!({ "doc": doc, "values": { "age": "150" } }));
+    assert!(matches!(&refused, Err(e) if e.to_string().contains("That age is too high.")), "{refused:?}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Renaming a field renames it in the formulas that read it: a sum dropped the field, notation
 /// read it as 0 and a script kept a stale value.
 #[test]
