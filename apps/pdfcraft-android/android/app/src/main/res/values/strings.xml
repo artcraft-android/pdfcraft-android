@@ -446,6 +446,7 @@
     <string name="viewer_add_comment">Add comment</string>
     <string name="viewer_strikethrough">Strikethrough</string>
     <string name="viewer_edit_text">Edit text</string>
+    <string name="viewer_read_from_here">Read from here</string>
     <string name="viewer_copy_text">Copy text</string>
     <!-- Translator note: accessibility labels of the two handles at the ends of selected text. -->
     <string name="viewer_selection_start">Selection start</string>

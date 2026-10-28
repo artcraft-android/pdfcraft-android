@@ -666,6 +666,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val saved = ReadAloud.savedPosition(getApplication(), key)?.takeIf { it.first in 0 until doc.pageCount }
+        // a reading that went to the end starts over at the beginning, as the reference's does
+        if (saved == ReadAloud.START_OVER) {
+            readAloud = ReadAloud(getApplication(), eng, doc, viewModelScope, 0, { readAloud = null }, key)
+            return
+        }
         if (saved != null) {
             readAloud = ReadAloud(getApplication(), eng, doc, viewModelScope, saved.first, { readAloud = null }, key, resumeAt = saved.second to saved.third)
             tell(text(R.string.msg_read_aloud_resumed), text(R.string.msg_read_aloud_start_over)) {
@@ -677,6 +682,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         readAloud = ReadAloud(getApplication(), eng, doc, viewModelScope, doc.viewer.currentPage, { readAloud = null }, key)
+    }
+
+    /**
+     * While Read aloud is on, a tap on a word moves the reading there, as the reference's does. False
+     * when no word is under [at] (the tap then shows or hides the bars).
+     */
+    suspend fun readAloudAt(doc: OpenDocument, at: io.github.artcraftandroid.pdfcraft.ui.viewer.PagePoint, slopPoints: Float): Boolean {
+        val current = readAloud ?: return false
+        val eng = engine ?: return false
+        val word = withContext(eng.commands) { eng.session.wordAt(doc.id, at.page.toUInt(), at.x, at.y, slopPoints) } ?: return false
+        if (readAloud !== current) return false
+        current.stop()
+        readAloud = ReadAloud(getApplication(), eng, doc, viewModelScope, word.page.toInt(), { readAloud = null }, docKey(doc), startGlyph = word.start)
+        return true
     }
 
     // ---- Tools' remembered settings, bookmarks, stars --------------------------------------

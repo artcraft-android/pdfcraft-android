@@ -227,7 +227,8 @@ fun BoxScope.SelectionMenu(vm: AppViewModel, doc: OpenDocument, sel: Selection) 
             vm.enterTool(doc, ViewerTool.Edit)
         }
         if (doc.info.allowsCopying) MenuRow(LucideIcons.Copy, stringResource(R.string.viewer_copy_text)) { vm.copySelection(doc) }
-        MenuRow(LucideIcons.Volume2, stringResource(R.string.common_tool_read_aloud)) {
+        // while reading aloud, the reading moves to the selection (the reference's "from here")
+        MenuRow(LucideIcons.Volume2, stringResource(if (vm.readAloud != null) R.string.viewer_read_from_here else R.string.common_tool_read_aloud)) {
             vm.startReadAloud(doc, fromSelection = true)
             doc.selection.clear()
         }

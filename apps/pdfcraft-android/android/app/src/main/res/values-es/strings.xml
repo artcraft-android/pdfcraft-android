@@ -445,6 +445,7 @@
     <string name="viewer_add_comment">Añadir comentario</string>
     <string name="viewer_strikethrough">Tachar</string>
     <string name="viewer_edit_text">Editar texto</string>
+    <string name="viewer_read_from_here">Leer desde aquí</string>
     <string name="viewer_copy_text">Copiar texto</string>
     <!-- Translator note: accessibility labels of the two handles at the ends of selected text. -->
     <string name="viewer_selection_start">Inicio de la selección</string>

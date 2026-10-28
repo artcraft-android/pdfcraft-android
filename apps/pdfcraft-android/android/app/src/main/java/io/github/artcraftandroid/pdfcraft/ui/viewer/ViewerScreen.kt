@@ -205,6 +205,11 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                     vm.tapField(doc, at) -> Unit
                     vm.tapComment(doc, at) -> Unit
                     vm.tapLink(doc, at) -> Unit
+                    // while reading aloud, a word moves the reading there; anywhere else shows or hides the bars
+                    vm.readAloud != null && at != null && ctl.tool == ViewerTool.None -> scope.launch {
+                        val slop = 12f / doc.viewer.pixelsPerPoint(at.page).coerceAtLeast(0.1f) * density.density
+                        if (!vm.readAloudAt(doc, at, slop)) ctl.toggleBars()
+                    }
                     doc.viewer.mode == PageMode.SinglePage && doc.viewer.zoom <= 1.01f && edgeTap(p.x, doc.viewer.viewW) != 0 -> {
                         doc.viewer.goToPage(doc.viewer.currentPage + edgeTap(p.x, doc.viewer.viewW))
                         ctl.barsVisible = false

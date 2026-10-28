@@ -361,11 +361,11 @@ class ReadAloud(
 
     fun stop() {
         playing = false
-        // keep the place for next time (the reference offers to resume); a finished reading starts over
+        // keep the place for next time (the reference offers to resume); a finished reading starts
+        // over at the beginning next time, as the reference's does
         if (key.isNotEmpty()) {
-            val e = prefs(prefsCtx).edit()
-            if (finished) e.remove("pos:$key") else e.putString("pos:$key", "$page,$index,$offset")
-            e.apply()
+            val (p, i, o) = if (finished) START_OVER else Triple(page, index, offset)
+            prefs(prefsCtx).edit().putString("pos:$key", "$p,$i,$o").apply()
         }
         runCatching {
             tts.stop()
@@ -392,6 +392,9 @@ class ReadAloud(
 
     companion object {
         val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+
+        /** The saved position of a reading that went to the end: the top of the first page. */
+        val START_OVER = Triple(0, 0, 0)
         /** A voice's pace at 1.0x, for turning 15 seconds into words. */
         private const val WORDS_PER_MINUTE = 128f
         private fun prefs(c: Context) = c.getSharedPreferences("readAloud", Context.MODE_PRIVATE)
