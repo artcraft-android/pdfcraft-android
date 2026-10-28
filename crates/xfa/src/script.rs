@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use pdfcraft_cos::{Dict, Document, Object, PdfString};
 
 use crate::data::{DataNode, data_path, parse_datasets};
-use crate::model::*;
+use crate::model::{Access, Field, Node, Presence, Script, SomIndices, Template};
 use crate::{Report, XfaError};
 
 /// Private key on the AcroForm: presence scripts set, by SOM path.
@@ -586,12 +586,44 @@ pub fn rerender(doc: &mut Document, tpl: &Template) -> Result<Report, XfaError> 
     if form.pages.is_empty() {
         return Err(XfaError::Malformed("the template laid out to no pages".into()));
     }
-    // The AcroForm keeps only the fields PdfCraft did not generate.
+    // The AcroForm keeps only the fields PdfCraft did not generate. Any generated fields edited in
+    // this overlay (along with their appearance streams and widget kids) are freed so a replaced
+    // password widget's value or masked appearance cannot stay in the overlay.
     let Some(root) = doc.root() else { return Err(XfaError::NotXfa) };
     if let Some((acro_ref, mut acro)) = acroform(doc) {
         let fields = acro.get(b"Fields").map(|f| doc.resolve(f)).and_then(|f| f.as_array().cloned()).unwrap_or_default();
-        let kept: Vec<Object> =
-            fields.into_iter().filter(|f| f.as_ref().is_none_or(|r| doc.get(r).as_dict().is_none_or(|d| !d.contains(crate::pdf::SOM_KEY)))).collect();
+        let mut kept = Vec::new();
+        let free_ap = |doc: &mut Document, d: &Dict| {
+            if let Some(ap) = d.get(b"AP").map(|a| doc.resolve(a)).and_then(|a| a.as_dict().cloned())
+                && let Some(n) = ap.get(b"N").and_then(Object::as_ref)
+                && doc.is_edited(n.num)
+            {
+                doc.free(n);
+            }
+        };
+        for f in fields {
+            if let Some(r) = f.as_ref()
+                && let Some(d) = doc.get(r).as_dict().cloned()
+                && d.contains(crate::pdf::SOM_KEY)
+            {
+                free_ap(doc, &d);
+                if let Some(kids) = d.get(b"Kids").map(|k| doc.resolve(k)).and_then(|k| k.as_array().cloned()) {
+                    for k in kids.iter().filter_map(Object::as_ref) {
+                        if let Some(kd) = doc.get(k).as_dict().cloned() {
+                            free_ap(doc, &kd);
+                        }
+                        if doc.is_edited(k.num) {
+                            doc.free(k);
+                        }
+                    }
+                }
+                if doc.is_edited(r.num) {
+                    doc.free(r);
+                }
+            } else {
+                kept.push(f);
+            }
+        }
         acro.set(b"Fields".to_vec(), Object::Array(kept));
         match acro_ref {
             Some(r) => doc.set(r, Object::Dict(acro)),
@@ -601,6 +633,9 @@ pub fn rerender(doc: &mut Document, tpl: &Template) -> Result<Report, XfaError> 
     let written = crate::pdf::write_form(doc, &form)?;
     let mut warnings = form.warnings;
     warnings.extend(written.warnings);
+    if written.usage_rights {
+        warnings.push(crate::pdf::USAGE_RIGHTS_REMOVED.into());
+    }
     warnings.dedup();
     Ok(Report { pages: written.pages, fields: written.fields, template_bytes: packets.xdp.len(), warnings })
 }

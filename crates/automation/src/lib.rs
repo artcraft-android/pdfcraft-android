@@ -106,6 +106,7 @@ const MAX_BOOKMARK_POSITION: f64 = 1_000_000.0;
 const FIND_FIRST_BATCH: usize = 8;
 const FIND_MAX_BATCH: usize = 128;
 
+use file_access::foreign_share;
 use text_cache::TextCache;
 
 type PageTexts = Vec<(usize, std::result::Result<Arc<PageText>, String>)>;
@@ -394,6 +395,36 @@ impl Automation {
                 let (path, page) = (a.path("path")?, self.page(&a)?);
                 self.apply(&a, Edit::SetBookmarkPage { path, page })?
             }
+            "bookmark_set_style" => {
+                let path = a.path("path")?;
+                // Left out keeps the colour; [0, 0, 0] is the default black.
+                let color = match a.get("color") {
+                    None => None,
+                    Some(v) => {
+                        let rgb: Option<Vec<f64>> = v.as_array().and_then(|c| c.iter().map(Value::as_f64).collect());
+                        match rgb.as_deref() {
+                            Some(&[r, g, b]) if [r, g, b].iter().all(|c| (0.0..=1.0).contains(c)) => Some([r, g, b]),
+                            _ => return Err(ToolError::InvalidArgs("color must be [r, g, b], each from 0 to 1".into())),
+                        }
+                    }
+                };
+                let (bold, italic) = (a.opt_bool("bold")?, a.opt_bool("italic")?);
+                if color.is_none() && bold.is_none() && italic.is_none() {
+                    return Err(ToolError::InvalidArgs("give color, bold or italic".into()));
+                }
+                let mut edits = Vec::new();
+                if let Some(color) = color {
+                    edits.push(Edit::SetBookmarkColor { path: path.clone(), color: Some(color) });
+                }
+                if bold.is_some() || italic.is_some() {
+                    edits.push(Edit::SetBookmarkStyle { path, bold, italic });
+                }
+                // A colour and a style given together are one step to undo, applied all or nothing.
+                match edits.len() {
+                    1 => self.apply(&a, edits.remove(0))?,
+                    _ => self.apply(&a, Edit::Batch { label: "Style".into(), edits })?,
+                }
+            }
             "bookmark_from_structure" => {
                 let mut out = self.apply(&a, Edit::BookmarksFromStructure)?;
                 let listing = self.bookmark_listing(&a)?;
@@ -405,7 +436,7 @@ impl Automation {
             "page_replace" => {
                 let pages = self.pages(&a, "pages")?;
                 let path = self.resolve(a.str("path")?, false)?;
-                let bytes = Arc::new(std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?);
+                let bytes = Arc::new(read_input(&path)?);
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let src_pages = match a.opt_ints("from_pages")? {
                     Some(p) => one_based(&p)?,
@@ -554,7 +585,7 @@ impl Automation {
                         "delete" => ImageEdit::Delete,
                         "replace" => {
                             let path = self.resolve(a.str("path")?, false)?;
-                            let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                            let bytes = read_input(&path)?;
                             ImageEdit::Replace {
                                 name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                                 bytes: Arc::new(bytes),
@@ -789,7 +820,7 @@ impl Automation {
             "form_fill" => self.form_fill(&a)?,
             "form_set_image" => {
                 let path = self.resolve(a.str("path")?, false)?;
-                let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                let bytes = read_input(&path)?;
                 self.apply(&a, Edit::SetFieldImage { name: a.str("field")?.to_owned(), image: Arc::new(bytes) })?
             }
             "form_reset" => self.form_reset(&a)?,
@@ -821,7 +852,27 @@ impl Automation {
             "page_add_image" => self.page_add_image(&a)?,
             "content_update" => self.content_update(&a)?,
             "content_delete" => self.content_delete(&a)?,
+            "content_copy" => self.content_copy(&a)?,
             "doc_print" => self.doc_print(&a)?,
+            "attachment_add" => {
+                let path = self.resolve(a.str("path")?, false)?;
+                let bytes = read_input(&path)?;
+                let name = match a.opt_str("name")? {
+                    Some(n) => n.to_string(),
+                    None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                };
+                let mime = pdfcraft_engine::mime_for_name(&name).map(str::to_string);
+                let description = a.opt_str("description")?.map(str::to_string);
+                // Only the document-level keys: an annotation attachment of the same name is not the new one.
+                let before = document_attachment_keys(self.doc(&a)?);
+                let out = self.apply(&a, Edit::AddAttachment { name, bytes, description, mime })?;
+                let key = document_attachment_keys(self.doc(&a)?).into_iter().find(|n| !before.contains(n)).unwrap_or_default();
+                json!({ "name": key, "document": out })
+            }
+            "attachment_delete" => {
+                let edit = Edit::DeleteAttachment { key: a.str("name")?.into() };
+                self.apply(&a, edit)?
+            }
             "doc_remove_hidden" => self.doc_remove_hidden(&a)?,
             "doc_audit_redactions" => self.doc_audit_redactions(&a)?,
             "fill_sign_add" => self.fill_sign_add(&a)?,
@@ -1023,7 +1074,7 @@ impl Automation {
 
     fn doc_open(&mut self, a: &Args) -> Result<Value> {
         let path = self.resolve(a.str("path")?, false)?;
-        let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+        let bytes = read_input(&path)?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let id = self.session.open(name, Some(path.to_string_lossy().into_owned()), Arc::new(bytes), a.opt_str("password")?).map_err(failed)?;
         let doc = self.session.get(id).ok_or_else(|| failed("the document vanished"))?;
@@ -1201,7 +1252,7 @@ impl Automation {
     }
 
     fn doc_optimize(&mut self, a: &Args) -> Result<Value> {
-        use pdfcraft_engine::optimize::{Compression, ImageSettings, Preset};
+        use pdfcraft_engine::optimize::{Compatibility, Compression, ImageSettings, Preset};
         let id = self.doc(a)?.id;
         let before = self.doc(a)?.bytes.len();
         let path = self.resolve(a.str("path")?, true)?;
@@ -1209,6 +1260,10 @@ impl Automation {
             None => Preset::Standard.settings(),
             Some(p) => Preset::from_name(p).ok_or_else(|| ToolError::InvalidArgs(format!("unknown preset {p:?} (standard, mobile)")))?.settings(),
         };
+        if let Some(c) = a.opt_str("compatibility")? {
+            settings.compatibility = Compatibility::from_name(c)
+                .ok_or_else(|| ToolError::InvalidArgs(format!("unknown compatibility {c:?} (retain, 1.4, 1.5, 1.6, 1.7, 2.0)")))?;
+        }
         let images = |key: &str, base: ImageSettings| -> Result<ImageSettings> {
             let Some(v) = a.get(key) else { return Ok(base) };
             let mut s = base;
@@ -1242,6 +1297,8 @@ impl Automation {
             ("discard_tags", &mut settings.discard_tags),
             ("discard_print_settings", &mut settings.discard_print_settings),
             ("flate_unencoded", &mut settings.flate_unencoded),
+            ("object_streams", &mut settings.object_streams),
+            ("lzw_to_flate", &mut settings.lzw_to_flate),
             ("remove_invalid_links", &mut settings.remove_invalid_links),
             ("remove_unreferenced_dests", &mut settings.remove_unreferenced_dests),
         ] {
@@ -1264,9 +1321,26 @@ impl Automation {
         };
         let (bytes, r) = self.session.optimized_bytes(id, &settings, &discard).map_err(failed)?;
         write_atomic(&path, &bytes)?;
+        fn valid_version(v: &[u8]) -> Option<&str> {
+            if matches!(v, [b'1'..=b'9', b'.', b'0'..=b'9']) { std::str::from_utf8(v).ok() } else { None }
+        }
+        let catalog_version = (settings.compatibility == Compatibility::Retain)
+            .then(|| {
+                let pw = self.doc(a).ok().and_then(|d| d.password.as_deref());
+                let doc = pdfcraft_cos::Document::open_with_password(bytes.clone(), pw).ok()?;
+                let root = doc.root()?;
+                doc.get(root).as_dict()?.name(b"Version").and_then(valid_version).map(str::to_owned)
+            })
+            .flatten();
+        let header_version = bytes.strip_prefix(b"%PDF-").and_then(|b| b.get(..3)).and_then(valid_version);
+        // Viewers read the later of the two (object streams raise the header past a lower catalog
+        // entry). Both are "d.d", so text order is version order.
+        let pdf_version = catalog_version.as_deref().into_iter().chain(header_version).max();
         let o = &r.optimize;
         Ok(json!({
             "path": path.to_string_lossy(),
+            "pdf_version": pdf_version,
+            "object_streams": settings.effective_object_streams(),
             "bytes_before": before,
             "bytes_after": bytes.len(),
             "merged_images": o.merged_images,
@@ -1280,6 +1354,7 @@ impl Automation {
             "alternate_images": o.alternate_images,
             "tags_removed": o.tags_removed,
             "streams_compressed": o.streams_compressed,
+            "lzw_streams": o.lzw_streams,
             "invalid_links": o.invalid_links,
             "invalid_bookmarks": o.invalid_bookmarks,
             "unreferenced_dests": o.unreferenced_dests,
@@ -1293,7 +1368,7 @@ impl Automation {
     fn mark_file(&self, a: &Args) -> Result<Option<pdfcraft_engine::MarkFile>> {
         let Some(p) = a.opt_str("file")? else { return Ok(None) };
         let path = self.resolve(p, false)?;
-        let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+        let bytes = read_input(&path)?;
         let page = a.opt_int("file_page")?.unwrap_or(1).max(1) as usize - 1;
         Ok(Some(pdfcraft_engine::MarkFile {
             name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
@@ -1476,7 +1551,7 @@ impl Automation {
                 let mut images = Vec::new();
                 for p in a.strs("paths")? {
                     let path = self.resolve(p, false)?;
-                    let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                    let bytes = read_input(&path)?;
                     images.push((path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), bytes));
                 }
                 let name = if images.len() == 1 {
@@ -1491,7 +1566,7 @@ impl Automation {
                     (Some(t), _) => ("Text".to_string(), t.to_string()),
                     (None, Some(p)) => {
                         let path = self.resolve(p, false)?;
-                        let t = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+                        let t = read_input(&path)?;
                         (path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), pdfcraft_engine::decode_text(&t))
                     }
                     (None, None) => return Err(ToolError::InvalidArgs("text needs `text` or `path`".into())),
@@ -1687,7 +1762,7 @@ impl Automation {
     fn insert_file(&mut self, a: &Args) -> Result<Value> {
         let at = self.position(a, "at")?;
         let path = self.resolve(a.str("path")?, false)?;
-        let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+        let bytes = read_input(&path)?;
         let pages = a.opt_ints("pages")?.map(|p| one_based(&p)).transpose()?;
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         self.apply(a, Edit::InsertPagesFrom { name, bytes: Arc::new(bytes), pages, at, field_conflicts: pdfcraft_organize::FieldConflicts::Rename })
@@ -1730,7 +1805,7 @@ impl Automation {
         // Each file is read, converted and copied in turn, so a long list holds one file at a time.
         let sources = paths.into_iter().zip(ranges).map(|(p, range)| -> std::result::Result<pdfcraft_engine::CombineSource, ToolError> {
             let path = self.resolve(p, false)?;
-            let bytes = std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?;
+            let bytes = read_input(&path)?;
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let (_, pdf) = self.session.convert_to_pdf(&name, &Arc::new(bytes)).map_err(failed)?;
             let title = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -1747,7 +1822,7 @@ impl Automation {
         let mut out = Vec::new();
         for &p in paths {
             let converted = self.resolve(p, false).map_err(|e| e.to_string()).and_then(|src| {
-                let bytes = std::fs::read(&src).map_err(|e| format!("{}: {e}", src.display()))?;
+                let bytes = read_input_bytes(&src).map_err(|e| format!("{}: {e}", src.display()))?;
                 let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 let stem = src.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
                 let (kind, pdf) = self.session.convert_to_pdf(&name, &Arc::new(bytes)).map_err(|e| e.to_string())?;
@@ -1851,7 +1926,7 @@ impl Automation {
                     if let Some(g) = group {
                         firsts.push((g, path.clone(), sources.len()));
                     }
-                    let bytes = Arc::new(std::fs::read(&path).map_err(|e| failed(format!("{}: {e}", path.display())))?);
+                    let bytes = Arc::new(read_input(&path)?);
                     // Images and text files are made into PDFs first (#569), as in the Combine files tab.
                     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     self.session.as_pdf(&file_name, &bytes).map_err(failed)?
@@ -2344,24 +2419,6 @@ fn lexical(path: &Path) -> Option<PathBuf> {
     Some(parts.iter().collect())
 }
 
-/// Whether `path` names another network share or device namespace than `root` (Windows
-/// `\\host\share`, `\\?\UNC\…`, `\\.\…`, `\\?\…`). Those are refused by name: even checking
-/// that one exists would contact the host. Drive letters are left to the normal check.
-fn foreign_share(path: &Path, root: &Path) -> bool {
-    use std::path::{Component, Prefix};
-    fn share(p: &Path) -> Option<String> {
-        let Some(Component::Prefix(prefix)) = p.components().next() else { return None };
-        let (kind, a, b) = match prefix.kind() {
-            Prefix::Disk(_) | Prefix::VerbatimDisk(_) => return None,
-            Prefix::UNC(host, share) | Prefix::VerbatimUNC(host, share) => ("unc", host, share),
-            Prefix::DeviceNS(name) => ("device", name, std::ffi::OsStr::new("")),
-            Prefix::Verbatim(name) => ("verbatim", name, std::ffi::OsStr::new("")),
-        };
-        Some(format!("{kind}\\{}\\{}", a.to_string_lossy(), b.to_string_lossy()).to_lowercase())
-    }
-    share(path).is_some_and(|s| share(root).as_ref() != Some(&s))
-}
-
 // ---- JSON helpers ----------------------------------------------------------------------------
 
 fn parse_style_ranges(value: Option<&Value>) -> Result<Vec<pdfcraft_engine::RangeStyle>> {
@@ -2478,6 +2535,18 @@ impl Args<'_> {
     }
 }
 
+/// The name-tree keys of a document's own attachments, leaving out the files attached to pages as comments.
+fn document_attachment_keys(doc: &Document) -> Vec<String> {
+    doc.info
+        .attachments
+        .iter()
+        .filter_map(|x| match &x.source {
+            pdfcraft_render::AttachmentSource::Document { key } => Some(key.clone()),
+            pdfcraft_render::AttachmentSource::Annotation { .. } => None,
+        })
+        .collect()
+}
+
 /// Bookmark rows in listing order as JSON: a row holds the rows that follow it on the page at the
 /// next level down in `children`, and paths and pages are 1-based.
 fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow], pages: &[pdfcraft_render::PageInfo]) -> Vec<Value> {
@@ -2491,6 +2560,16 @@ fn nest_rows(rows: &[pdfcraft_engine::BookmarkRow], pages: &[pdfcraft_render::Pa
         }
         let path: Vec<usize> = row.path.iter().map(|p| p.saturating_add(1)).collect();
         let mut fields = json!({ "path": path, "title": row.title, "page": row.page.map(|p| p.saturating_add(1)), "open": row.open });
+        // Only what differs from the defaults (black, regular), as the PDF itself stores it.
+        if let Some(color) = row.color {
+            fields["color"] = json!(color);
+        }
+        if row.bold {
+            fields["bold"] = json!(true);
+        }
+        if row.italic {
+            fields["italic"] = json!(true);
+        }
         if let Some(destination) = row.page.and_then(|p| pages.get(p)).and_then(|p| destination(&row.view, p)) {
             fields["destination"] = destination;
         }
@@ -2602,6 +2681,9 @@ fn info(d: &Document) -> Value {
         "creator": i.creator, "producer": i.producer,
         "tagged": i.tagged,
         "has_javascript": i.has_javascript,
+        // Where the document opens (/OpenAction, named destinations resolved): 1-based page and
+        // destination, null without one.
+        "open_destination": i.open_dest.as_ref().map(|(p, view)| json!({ "page": page1(*p), "destination": i.pages.get(*p).and_then(|pg| destination(view, pg)) })),
         // XFA forms: "static" (the PDF's own fields work; the XFA data is ignored) or "dynamic"
         // (laid out from the template by PdfCraft, see xfa_layout; placeholder pages when that failed).
         "xfa": i.xfa.map(|x| match x { pdfcraft_render::Xfa::Static => "static", pdfcraft_render::Xfa::Dynamic => "dynamic" }),
@@ -2622,7 +2704,8 @@ fn info(d: &Document) -> Value {
         // geometry-taking tools (#129).
         "annotations": i.annotations.iter().map(|a| json!({
             "page": page1(a.page), "type": a.subtype, "author": a.author, "contents": a.contents,
-            "modified": a.modified, "name": a.name, "in_reply_to": a.in_reply_to, "rect": view_rect(i, a.page, a.rect),
+            "modified": a.modified, "name": a.name, "in_reply_to": a.in_reply_to,
+            "rect": view_rect(i, a.page, a.shown_rect(i.pages.get(a.page).map_or(0, |p| p.rotation))),
         })).collect::<Vec<_>>(),
         "fields": i.fields.iter().map(|f| json!({
             "name": f.name, "kind": format!("{:?}", f.kind), "value": f.value, "page": f.page.map(page1),
@@ -2644,7 +2727,8 @@ fn info(d: &Document) -> Value {
                     })).collect::<Vec<_>>(),
                     "preserve_rb": preserve_rb,
                 }),
-                pdfcraft_render::LinkTarget::RemoteGoTo { file, destination, new_window } => json!({
+                pdfcraft_render::LinkTarget::RemoteGoTo { launch, file, destination, new_window } => json!({
+                    "action": if *launch { "Launch" } else { "GoToR" },
                     "remote_document": file,
                     "destination": match destination {
                         pdfcraft_render::RemoteDestination::Default => json!({ "kind": "default" }),
@@ -2705,7 +2789,7 @@ fn extract_parallel(bytes: &Arc<Vec<u8>>, password: Option<Arc<str>>, pages: &[u
         }
     };
     let config = RenderConfig { password, ..Default::default() };
-    let workers = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, |n| n.get()).min(8) };
+    let workers = if cfg!(target_arch = "wasm32") { 1 } else { std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get).min(8) };
     // Small jobs aren't worth a second parse of the document.
     if workers == 1 || pages.len() < 8 {
         let mut r = PageRenderer::new(bytes.clone(), config);
@@ -2751,6 +2835,28 @@ fn unused(dir: &Path, stem: &str) -> PathBuf {
         return first;
     }
     (2..10_000u32).map(|n| child(dir, &format!("{stem} ({n}).pdf"))).find(|p| !p.exists()).unwrap_or(first)
+}
+
+/// Largest input file a tool reads into memory (512 MiB, matching `doc_batch`).
+pub(crate) const MAX_INPUT: u64 = 512 * 1024 * 1024;
+
+/// Read a resolved input file of at most [`MAX_INPUT`] bytes without buffering past the cap.
+pub(crate) fn read_input_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let file = std::fs::File::open(path)?;
+    if file.metadata().is_ok_and(|m| m.is_file() && m.len() > MAX_INPUT) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "input exceeds 512 MiB"));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_INPUT + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_INPUT {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "input exceeds 512 MiB"));
+    }
+    Ok(bytes)
+}
+
+pub(crate) fn read_input(path: &Path) -> Result<Vec<u8>> {
+    read_input_bytes(path).map_err(|e| failed(format!("{}: {e}", path.display())))
 }
 
 /// Write and sync a temporary file in the same directory, then rename over the target.
@@ -3309,5 +3415,37 @@ mod tests {
             json(&mut a, "doc_close", json!({"doc": id.0, "discard_changes": true}));
             assert!(a.session.get(id).is_none());
         }
+    }
+
+    #[test]
+    fn tool_file_reads_refuse_inputs_exceeding_512_mib() {
+        let dir = staging_dir("capped-read");
+        let huge = dir.join("huge.bin");
+        let file = std::fs::File::create(&huge).unwrap();
+        file.set_len(MAX_INPUT + 1).unwrap();
+        drop(file);
+        let huge_str = huge.to_string_lossy().into_owned();
+
+        let mut a = Automation::new();
+        let id = a.session.open("a.pdf", None, Arc::new(numbered_pages(2)), None).unwrap().0;
+        for (tool, args) in [
+            ("doc_open", json!({ "path": huge_str })),
+            ("page_insert_file", json!({ "doc": id, "at": 1, "path": huge_str })),
+            ("page_replace", json!({ "doc": id, "pages": [1], "path": huge_str })),
+            ("page_add_image", json!({ "doc": id, "page": 1, "path": huge_str })),
+            ("doc_import_data", json!({ "doc": id, "path": huge_str })),
+            ("doc_create", json!({ "from": "text", "path": huge_str })),
+            ("doc_create", json!({ "from": "images", "paths": [huge_str] })),
+            ("doc_combine", json!({ "paths": [huge_str, huge_str] })),
+            ("form_merge_data", json!({ "paths": [huge_str], "path": dir.join("out.csv").to_string_lossy() })),
+            ("comment_add", json!({ "doc": id, "page": 1, "type": "attachment", "at": [72.0, 72.0], "path": huge_str })),
+            ("stamp_custom", json!({ "doc": id, "page": 1, "at": [72.0, 72.0], "path": huge_str })),
+            ("sign_trust", json!({ "paths": [huge_str] })),
+            ("attachment_add", json!({ "doc": id, "path": huge_str })),
+        ] {
+            let err = a.call(tool, &args).unwrap_err().to_string();
+            assert!(err.contains("input exceeds 512 MiB"), "{tool}: {err}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

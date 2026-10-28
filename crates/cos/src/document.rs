@@ -938,6 +938,11 @@ impl Document {
         &self.version
     }
 
+    /// Set the PDF header version (`"1.4"`, `"1.7"`, `"2.0"`, …) written by a full save.
+    pub fn set_version(&mut self, version: impl Into<String>) {
+        self.version = version.into();
+    }
+
     pub fn trailer(&self) -> &Dict {
         &self.trailer
     }
@@ -1382,6 +1387,17 @@ impl Document {
     /// Delete an object (its number becomes free with the next generation).
     pub fn free(&mut self, r: ObjRef) {
         self.overlay.insert(r.num, Slot::Freed(r.generation.saturating_add(1)));
+    }
+
+    /// Free what was added since the file was read and nothing refers to any more: the objects
+    /// [`SaveOptions::drop_unlinked`](crate::SaveOptions::drop_unlinked) leaves out of an
+    /// incremental save, freed as it writes them (the generation stays). For a writer about to
+    /// add an object that nothing refers to either, which that option would leave out too.
+    pub fn free_unlinked_additions(&mut self) {
+        for num in crate::writer::unlinked_additions(self) {
+            let generation = self.generation(num);
+            self.overlay.insert(num, Slot::Freed(generation));
+        }
     }
 
     /// Record `current`'s object graph as unsaved edits of this document.

@@ -14,6 +14,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::collections::{HashMap, HashSet};
+
 use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString, Stream};
 
 pub mod appearance;
@@ -66,7 +68,9 @@ impl Markup {
     }
 }
 
-/// The standard text-annotation icon names (§12.5.6.4, Table 175).
+/// Text-annotation icon names (`/Name`). The first seven are the standard names ISO 32000-2
+/// §12.5.6.4, Table 175 asks every viewer to draw; the rest are further names in common use, which
+/// the same table allows ("Additional names may be supported as well").
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum NoteIcon {
     #[default]
@@ -77,6 +81,13 @@ pub enum NoteIcon {
     Key,
     NewParagraph,
     Paragraph,
+    Check,
+    Circle,
+    Cross,
+    CrossHairs,
+    Star,
+    RightArrow,
+    UpArrow,
 }
 
 impl NoteIcon {
@@ -89,11 +100,36 @@ impl NoteIcon {
             NoteIcon::Key => "Key",
             NoteIcon::NewParagraph => "NewParagraph",
             NoteIcon::Paragraph => "Paragraph",
+            NoteIcon::Check => "Check",
+            NoteIcon::Circle => "Circle",
+            NoteIcon::Cross => "Cross",
+            NoteIcon::CrossHairs => "CrossHairs",
+            NoteIcon::Star => "Star",
+            NoteIcon::RightArrow => "RightArrow",
+            NoteIcon::UpArrow => "UpArrow",
         }
     }
 
+    /// Every icon, the standard names first.
+    pub const ALL: [NoteIcon; 14] = [
+        Self::Comment,
+        Self::Note,
+        Self::Help,
+        Self::Insert,
+        Self::Key,
+        Self::NewParagraph,
+        Self::Paragraph,
+        Self::Check,
+        Self::Circle,
+        Self::Cross,
+        Self::CrossHairs,
+        Self::Star,
+        Self::RightArrow,
+        Self::UpArrow,
+    ];
+
     pub fn from_name(n: &str) -> Option<Self> {
-        [Self::Comment, Self::Note, Self::Help, Self::Insert, Self::Key, Self::NewParagraph, Self::Paragraph].into_iter().find(|i| i.name() == n)
+        Self::ALL.into_iter().find(|i| i.name() == n)
     }
 }
 
@@ -750,8 +786,9 @@ thread_local! {
     static ANNOTS_ENTRIES_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// Replace a page's `/Annots`, writing into the shared array object when it is indirect.
-fn set_annots(doc: &mut Document, page: ObjRef, list: Vec<Object>) -> Result<(), AnnotError> {
+/// Replace a page's `/Annots`, writing into the shared array object when it is indirect. An empty
+/// list removes a direct `/Annots`.
+pub fn set_annots(doc: &mut Document, page: ObjRef, list: Vec<Object>) -> Result<(), pdfcraft_cos::CosError> {
     let existing = doc.get(page).as_dict().and_then(|d| d.reference(b"Annots"));
     match existing {
         Some(r) if doc.get(r).as_array().is_some() => doc.set(r, Object::Array(list)),
@@ -816,6 +853,17 @@ pub fn is_fill_sign(doc: &Document, d: &Dict) -> bool {
 
 fn annotation_flags(doc: &Document, d: &Dict) -> i64 {
     d.get(b"F").and_then(|f| doc.resolve(f).as_int()).unwrap_or(0)
+}
+
+/// Whether the renderer keeps the annotation upright on a turned page: the NoRotate flag, with
+/// `/F` read as the renderer reads it (a real truncated, a value that isn't a `u32` no flags).
+fn drawn_upright(doc: &Document, d: &Dict) -> bool {
+    let f = match d.get(b"F").map(|f| doc.resolve(f)).as_deref() {
+        Some(Object::Int(i)) => *i,
+        Some(Object::Real(r)) => *r as i64,
+        _ => 0,
+    };
+    u32::try_from(f).is_ok_and(|f| i64::from(f) & FLAG_NO_ROTATE != 0)
 }
 
 /// Whether any page has a Fill & Sign annotation that flatten would bake in (not hidden).
@@ -986,7 +1034,7 @@ fn rect_for(shape: &Shape, style: &Style) -> Result<[f64; 4], AnnotError> {
             grow(bounds([*from, *to].into_iter()).unwrap_or_default(), pad + 1.0)
         }
         Shape::Ink { strokes } | Shape::Signature { strokes } => {
-            if strokes.iter().all(|s| s.is_empty()) || !strokes.iter().flatten().all(|p| finite(p)) {
+            if strokes.iter().all(Vec::is_empty) || !strokes.iter().flatten().all(|p| finite(p)) {
                 return Err(bad("drawing (no points)"));
             }
             // Strokes of three or more points are drawn as curves, which stay within their
@@ -1198,7 +1246,7 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
             d.set(b"PCOutline".to_vec(), Object::Array(list));
         }
         Shape::CustomStamp { name, picture, image, size, .. } => {
-            let clean: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            let clean: String = name.chars().filter(char::is_ascii_alphanumeric).collect();
             d.set(b"Name".to_vec(), Object::name(&format!("PCCustom{clean}")));
             d.set(b"PCPicture".to_vec(), Object::Ref(*picture));
             d.set(b"PCPictureImage".to_vec(), Object::Bool(*image));
@@ -1582,7 +1630,14 @@ pub fn with_missing_appearances_cached(doc: &Document, cache: &mut AppearanceCac
                 apply_appearance(copy.get_or_insert_with(|| doc.clone()), r, &d, stream).ok();
                 continue;
             }
-            let Some(stream) = build_appearance(doc, &d) else { continue };
+            // Another program's stamp gets a drawing for display only (ISO 32000-2 Table 184). Its
+            // `/AP`, if any, has no `/N` to keep here.
+            let other_stamp = || {
+                let mut bare = d.clone();
+                bare.remove(b"AP");
+                appearance::display_stamp(&bare)
+            };
+            let Some(stream) = build_appearance(doc, &d).or_else(other_stamp) else { continue };
             cache.insert(r, &stream);
             // Fails only when `r` isn't a dictionary, which the build just ruled out.
             apply_appearance(copy.get_or_insert_with(|| doc.clone()), r, &d, stream).ok();
@@ -1643,36 +1698,52 @@ pub fn delete_annotation(doc: &mut Document, page: usize, index: usize) -> Resul
     if let Some(r) = target.as_ref() {
         unlocked(doc, r)?;
     }
-    let mut doomed: Vec<ObjRef> = target.as_ref().into_iter().collect();
-    // Replies (`/IRT`) and pop-ups (`/Parent`) of anything doomed, to a fixpoint.
-    loop {
-        let before = doomed.len();
-        for e in &list {
-            let Some(r) = e.as_ref() else { continue };
-            if doomed.contains(&r) {
-                continue;
-            }
-            let obj = doc.get(r);
-            let Some(d) = obj.as_dict() else { continue };
-            let points_at = |k: &[u8]| d.reference(k).is_some_and(|t| doomed.contains(&t));
-            if points_at(b"IRT") || points_at(b"Parent") {
-                doomed.push(r);
-            }
-        }
-        for r in doomed.clone() {
-            if let Some(pop) = doc.get(r).as_dict().and_then(|d| d.reference(b"Popup"))
-                && !doomed.contains(&pop)
-            {
-                doomed.push(pop);
-            }
-        }
-        if doomed.len() == before {
-            break;
+    // An inline comment has no reference to collect; the pop-up it names still goes.
+    let seed = target.as_ref().or_else(|| target.as_dict().and_then(|d| d.reference(b"Popup")));
+    let doomed = with_replies_and_popups(doc, &list, seed);
+    let kept: Vec<Object> = list.into_iter().enumerate().filter(|(i, e)| *i != index && !goes_with(e, &doomed)).map(|(_, e)| e).collect();
+    Ok(set_annots(doc, p, kept)?)
+}
+
+/// Whether the `/Annots` entry `entry` goes with `going` (from [`with_replies_and_popups`]): it is
+/// one of them, or it is written inline (a file can, though the standard asks for references) and
+/// replies to (`/IRT`) or pops up for (`/Parent`) one of them. An inline entry has no reference
+/// for the walk to collect, so it is matched here.
+pub fn goes_with(entry: &Object, going: &HashSet<ObjRef>) -> bool {
+    match entry.as_ref() {
+        Some(r) => going.contains(&r),
+        None => entry.as_dict().is_some_and(|d| [d.reference(b"IRT"), d.reference(b"Parent")].into_iter().flatten().any(|r| going.contains(&r))),
+    }
+}
+
+/// `doomed` and what goes with it, as Acrobat deletes a comment: the entries of `list` (one or
+/// more pages' `/Annots`) that reply to (`/IRT`) or pop up for (`/Parent`) anything going, their
+/// own replies, and the pop-ups going annotations name (`/Popup`). An inline reply has no
+/// reference to collect, but the pop-up it names is. Each annotation is visited once, so a long or
+/// cyclic chain costs no more than its length. Filter a list with [`goes_with`], which also
+/// matches inline entries.
+pub fn with_replies_and_popups(doc: &Document, list: &[Object], doomed: impl IntoIterator<Item = ObjRef>) -> HashSet<ObjRef> {
+    let mut hanging: HashMap<ObjRef, Vec<ObjRef>> = HashMap::new();
+    for e in list {
+        let obj = doc.resolve(e);
+        let Some(d) = obj.as_dict() else { continue };
+        // What goes with the annotation this entry hangs off: the entry, or for an inline one the
+        // pop-up it names.
+        let Some(goes) = e.as_ref().or_else(|| d.reference(b"Popup")) else { continue };
+        for on in [d.reference(b"IRT"), d.reference(b"Parent")].into_iter().flatten() {
+            hanging.entry(on).or_default().push(goes);
         }
     }
-    let kept: Vec<Object> =
-        list.into_iter().enumerate().filter(|(i, e)| *i != index && !e.as_ref().is_some_and(|r| doomed.contains(&r))).map(|(_, e)| e).collect();
-    set_annots(doc, p, kept)
+    let mut going = HashSet::new();
+    let mut todo: Vec<ObjRef> = doomed.into_iter().collect();
+    while let Some(r) = todo.pop() {
+        if !going.insert(r) {
+            continue;
+        }
+        todo.extend(hanging.get(&r).into_iter().flatten());
+        todo.extend(doc.get(r).as_dict().and_then(|d| d.reference(b"Popup")));
+    }
+    going
 }
 
 /// Change a comment's text. Text boxes are redrawn to show it, and their rectangle follows the
@@ -2252,6 +2323,10 @@ pub struct Summary {
     pub modified: Option<String>,
     pub name: Option<String>,
     pub in_reply_to: Option<String>,
+    /// The page and `/Annots` position `/IRT` points at, by reference (`/NM` need not be unique).
+    pub parent: Option<(usize, usize)>,
+    /// `/RT /Group`: grouped with the `/IRT` annotation (Replace Text's caret), not a reply to it.
+    pub grouped: bool,
     pub rect: [f32; 4],
     pub color: Option<[f32; 3]>,
     pub state: Option<String>,
@@ -2264,6 +2339,8 @@ pub struct Summary {
     pub opacity: f32,
     /// The line width in points: `/BS /W`, else the third number of `/Border`.
     pub width: Option<f32>,
+    /// The NoRotate flag (`/F` bit 5), as `pdfcraft_render::Annotation::no_rotate`.
+    pub no_rotate: bool,
     /// A line's two ends (`/L`), or the corners of connected lines, a polygon or a cloud
     /// (`/Vertices`), in user space; empty for other comments.
     pub points: Vec<[f32; 2]>,
@@ -2287,13 +2364,35 @@ pub fn is_comment_subtype(subtype: &str) -> bool {
     !matches!(subtype, "Link" | "Widget" | "Popup" | "Screen" | "Movie" | "RichMedia" | "3D" | "PrinterMark" | "TrapNet" | "Watermark")
 }
 
+/// Where a reference to a reference (`5 0 obj 6 0 R endobj`) ends, as `pdfcraft_render::inspect`
+/// follows it, within a few steps (a cycle stops there).
+fn final_ref(doc: &Document, mut r: ObjRef) -> ObjRef {
+    for _ in 0..8 {
+        match &*doc.get(r) {
+            Object::Ref(next) => r = *next,
+            _ => break,
+        }
+    }
+    r
+}
+
 /// Every comment (see [`is_comment_subtype`]), ordered by page and then top edge.
 pub fn summaries(doc: &Document) -> Vec<Summary> {
     let mut out = Vec::new();
     let Ok(pages) = page_refs(doc) else { return out };
-    for (page, p) in pages.iter().enumerate() {
-        for (index, entry) in annots(doc, *p).iter().enumerate() {
-            let obj = doc.resolve(entry);
+    let lists: Vec<Vec<Object>> = pages.iter().map(|p| annots(doc, *p)).collect();
+    // Where each annotation is first listed, so a reply's `/IRT` finds its parent by reference.
+    let mut slots: std::collections::HashMap<ObjRef, (usize, usize)> = std::collections::HashMap::new();
+    for (page, list) in lists.iter().enumerate() {
+        for (index, entry) in list.iter().enumerate() {
+            if let Some(r) = entry.as_ref() {
+                slots.entry(final_ref(doc, r)).or_insert((page, index));
+            }
+        }
+    }
+    for (page, list) in lists.iter().enumerate() {
+        for (index, entry) in list.iter().enumerate() {
+            let obj = entry.as_ref().map_or_else(|| doc.resolve(entry), |r| doc.get(final_ref(doc, r)));
             let Some(d) = obj.as_dict() else { continue };
             let Some(subtype) = d.name(b"Subtype").map(|s| String::from_utf8_lossy(s).into_owned()) else { continue };
             if !is_comment_subtype(&subtype) {
@@ -2327,7 +2426,9 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 "PolyLine" | "Polygon" => nums(b"Vertices").as_chunks::<2>().0.to_vec(),
                 _ => Vec::new(),
             };
-            let in_reply_to = d.get(b"IRT").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned()).and_then(|p| text_value(doc, &p, b"NM"));
+            let irt = d.get(b"IRT").map(|o| o.as_ref().map_or_else(|| doc.resolve(o), |r| doc.get(final_ref(doc, r))));
+            let in_reply_to = irt.and_then(|o| o.as_dict().cloned()).and_then(|p| text_value(doc, &p, b"NM"));
+            let parent = d.get(b"IRT").and_then(Object::as_ref).and_then(|r| slots.get(&final_ref(doc, r)).copied());
             // keep in step with `pdfcraft_render::inspect`
             let opacity = d.get(b"CA").and_then(|o| doc.resolve(o).as_f64()).filter(|v| v.is_finite()).map_or(1.0, |v| v.clamp(0.0, 1.0) as f32);
             let width = d
@@ -2348,6 +2449,8 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 modified: text_value(doc, d, b"M"),
                 name: text_value(doc, d, b"NM"),
                 in_reply_to,
+                parent,
+                grouped: d.name(b"RT") == Some(b"Group"),
                 rect,
                 color,
                 state: text_value(doc, d, b"State"),
@@ -2357,6 +2460,7 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 fill_sign: is_fill_sign(doc, d),
                 opacity,
                 width,
+                no_rotate: drawn_upright(doc, d),
                 points,
             });
         }
