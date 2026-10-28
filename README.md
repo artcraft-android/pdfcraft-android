@@ -207,7 +207,7 @@ PdfCraft for Android is in beta.
 | Reading: continuous and single page, Reading Mode, Night Mode, find, text selection, links, bookmarks and contents, attachments | ✅ |
 | Read aloud with the phone's voice, the words marked as they're read, and a full player | ✅ |
 | Comments: notes, voice comments, highlight, underline, strikethrough, drawing (snap to shape), text; the Comment List and threads | ✅ |
-| Forms, and Fill & Sign: text, marks and a drawn or imported signature | ✅ |
+| Forms, and Fill & Sign: text, marks and a drawn or imported signature; form JavaScript (calculations, field checks, buttons) | ✅ |
 | Digital signatures: sign with a digital ID (a .p12 / .pfx file, or one made in the app), check a document's signatures, trust signers | ✅ |
 | Edit PDF: edit text, add text and images, move, resize and turn pictures | ✅ · cropping a picture ⬜ |
 | Organize and crop pages | ✅ |
@@ -215,6 +215,7 @@ PdfCraft for Android is in beta.
 | Export to Word, RTF, Excel, PowerPoint, JPEG and PNG | ✅ · Word 97 ⬜ |
 | Recognize text | ✅ (the Latin alphabet without accents) |
 | A customizable quick toolbar, upright and sideways layouts, light and dark themes | ✅ |
+| Extra Features in Preferences, off until you turn them on: the status bar in documents | ✅ |
 | Translations: all of the app's text is ready to translate ([how](#translating)) | ✅ · Spanish ✅ · other languages ⬜ |
 | AI assistant, cloud storage, sharing for review | 🚫 PdfCraft is a local app |
 
