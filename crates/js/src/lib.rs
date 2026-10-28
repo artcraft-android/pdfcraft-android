@@ -1202,7 +1202,11 @@ pub fn run_shared(script: &str, event: &Event, doc: &DocInfo, fields: Arc<Vec<Fi
                 .stack_size(SCRIPT_STACK)
                 .spawn_scoped(scope, || run_here(script, event, doc, fields, doc_scripts, limits));
             match spawned {
-                Ok(thread) => thread.join().unwrap_or_else(|_| failed("the script stopped with an internal error".into())),
+                Ok(thread) => thread.join().unwrap_or_else(|panic| {
+                    // what went wrong, for the console: a panic's message is a &str or a String
+                    let why = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
+                    failed(format!("the script stopped with an internal error{}", why.map(|w| format!(": {w}")).unwrap_or_default()))
+                }),
                 Err(e) => failed(format!("the script engine could not start: {e}")),
             }
         })
