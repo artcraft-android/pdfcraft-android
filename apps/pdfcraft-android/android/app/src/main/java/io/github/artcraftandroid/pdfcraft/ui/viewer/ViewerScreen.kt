@@ -219,6 +219,8 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
             },
             // a double tap zooms with the bars out of the way, as the reference's does
             onDoubleTap = { if (ctl.tool == ViewerTool.None && !ctl.searching) ctl.barsVisible = false },
+            // with no tool out, a mouse drag selects text, as a desktop does
+            onMouseSelect = if (ctl.tool == ViewerTool.None) selection::selectSpan else null,
             onLongPress = { p, at ->
                 if (at != null) scope.launch {
                     val slop = 12f / doc.viewer.pixelsPerPoint(at.page).coerceAtLeast(0.1f) * density.density

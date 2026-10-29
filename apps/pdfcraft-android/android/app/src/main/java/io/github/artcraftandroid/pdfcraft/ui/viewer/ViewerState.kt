@@ -219,9 +219,19 @@ class ViewerState(pages: List<PageSize>) {
         val lx = (p.x + scrollX) / zoom
         val ly = (p.y + scrollY) / zoom
         val i = l.pageAt(lx, ly) ?: if (nearest && l.rects.isNotEmpty()) l.nearestPage(lx, ly) else return null
-        val r = l.rects[i]
-        val s = l.scaleOf(i)
-        return PagePoint(i, ((lx - r.left) / s).coerceIn(0f, pages[i].width), ((ly - r.top) / s).coerceIn(0f, pages[i].height))
+        return screenToPageOf(i, p)
+    }
+
+    /** Screen point [p] in page [page]'s points, held to the page (a drag that leaves the page). */
+    fun screenToPageOf(page: Int, p: Offset): PagePoint? {
+        val l = layout
+        val r = l.rects.getOrNull(page) ?: return null
+        val size = pages.getOrNull(page) ?: return null
+        val s = l.scaleOf(page)
+        if (s <= 0f) return null
+        val lx = (p.x + scrollX) / zoom
+        val ly = (p.y + scrollY) / zoom
+        return PagePoint(page, ((lx - r.left) / s).coerceIn(0f, size.width), ((ly - r.top) / s).coerceIn(0f, size.height))
     }
 
     /** Screen position of a point on page [page] given in its points. */

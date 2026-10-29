@@ -17,8 +17,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -27,7 +29,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -51,11 +58,21 @@ data class CanvasLook(
     val invert: Boolean = false,
 )
 
+/** Screen pixels a mouse wheel's notch scrolls (the reference's step). */
+private const val WHEEL_STEP = 100f
+
+/** The zoom one notch of Ctrl and the wheel makes. */
+private const val WHEEL_ZOOM = 1.25f
+
+/** How soon after one the wheel may turn another single page. */
+private const val WHEEL_TURN_MS = 800L
+
 /**
  * The document view: pages laid out by [state], pinch to zoom, drag and fling to scroll, double
  * tap to zoom in or back out (and [onDoubleTap]), tap for [onTap] (bars), long press for [onLongPress]. [overlay]
  * draws over the pages in screen space (selection, search hits, comments being made). When
- * [gesturesEnabled] is false a tool above takes the touches itself.
+ * [gesturesEnabled] is false a tool above takes the touches itself. A mouse wheel scrolls (zooms
+ * with Ctrl), and a mouse drag goes to [onMouseSelect] when there is one.
  */
 @Composable
 fun PageCanvas(
@@ -71,6 +88,8 @@ fun PageCanvas(
     onLongPress: (Offset, PagePoint?) -> Unit = { _, _ -> },
     onDoubleTap: () -> Unit = {},
     onGestureStart: () -> Unit = {},
+    /** A drag with the mouse's main button: from and to, on the page it began on (text selection). */
+    onMouseSelect: ((PagePoint, PagePoint) -> Unit)? = null,
     overlay: DrawScope.() -> Unit = {},
 ) {
     val density = LocalDensity.current
@@ -80,6 +99,7 @@ fun PageCanvas(
     // device pixels per point beyond which a whole page isn't worth more pixels (tiles take over)
     val maxScale = with(density) { 4.dp.toPx() }
     val flinger = remember { arrayOfNulls<Job>(1) }
+    val mouseSelect by rememberUpdatedState(onMouseSelect)
 
     // keep the renderers working on what is in view
     LaunchedEffect(state, images, generation) {
@@ -112,12 +132,58 @@ fun PageCanvas(
                     onPress = { flinger[0]?.cancel() },
                 )
             }
+            // a mouse wheel scrolls, a single page turning at its edge, and with Ctrl zooms about
+            // the pointer, as the reference's viewer does
+            .pointerInput(state) {
+                var lastTurn = 0L
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type != PointerEventType.Scroll) continue
+                        val change = event.changes.firstOrNull() ?: continue
+                        val d = change.scrollDelta
+                        if (d == Offset.Zero) continue
+                        flinger[0]?.cancel()
+                        when {
+                            event.keyboardModifiers.isCtrlPressed -> state.zoomBy(if (d.y < 0f) WHEEL_ZOOM else 1f / WHEEL_ZOOM, change.position)
+                            state.mode == PageMode.SinglePage -> {
+                                val rest = state.scrollBy(0f, -d.y * WHEEL_STEP)
+                                if (rest.y != 0f && change.uptimeMillis - lastTurn > WHEEL_TURN_MS) {
+                                    lastTurn = change.uptimeMillis
+                                    state.goToPage(state.currentPage + if (d.y > 0f) 1 else -1)
+                                }
+                            }
+                            else -> state.scrollBy(-d.x * WHEEL_STEP, -d.y * WHEEL_STEP)
+                        }
+                        change.consume()
+                    }
+                }
+            }
             .pointerInput(state, gesturesEnabled) {
                 if (!gesturesEnabled) return@pointerInput
                 val touchSlop = viewConfiguration.touchSlop
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     flinger[0]?.cancel()
+                    // a drag with the mouse's main button selects text instead of moving the page; the
+                    // right and middle buttons still move it
+                    val buttons = currentEvent.buttons
+                    val select = mouseSelect
+                        ?.takeIf { down.type == PointerType.Mouse && !buttons.isSecondaryPressed && !buttons.isTertiaryPressed }
+                        ?.let { f -> state.screenToPage(down.position)?.let { from -> from to f } }
+                    if (select != null) {
+                        val (from, report) = select
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            if ((change.position - down.position).getDistance() > touchSlop) {
+                                state.screenToPageOf(from.page, change.position)?.let { report(from, it) }
+                                change.consume()
+                            }
+                        }
+                        return@awaitEachGesture
+                    }
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, down.position)
                     var moved = Offset.Zero
