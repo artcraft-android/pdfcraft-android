@@ -545,8 +545,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val center = androidx.compose.ui.geometry.Offset(v.viewW / 2f, v.viewH / 2f)
         when {
             ctrl && keyCode == android.view.KeyEvent.KEYCODE_P -> print(doc)
-            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_EQUALS || keyCode == android.view.KeyEvent.KEYCODE_PLUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ADD) -> v.zoomTo(v.zoom + 0.25f, center)
-            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_MINUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_SUBTRACT) -> v.zoomTo(v.zoom - 0.25f, center)
+            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_EQUALS || keyCode == android.view.KeyEvent.KEYCODE_PLUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ADD) -> v.zoomStep(1, center)
+            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_MINUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_SUBTRACT) -> v.zoomStep(-1, center)
             ctrl -> return false
             keyCode == android.view.KeyEvent.KEYCODE_N || keyCode == android.view.KeyEvent.KEYCODE_PAGE_DOWN -> v.goToPage(v.currentPage + 1)
             keyCode == android.view.KeyEvent.KEYCODE_P || keyCode == android.view.KeyEvent.KEYCODE_PAGE_UP -> v.goToPage(v.currentPage - 1)

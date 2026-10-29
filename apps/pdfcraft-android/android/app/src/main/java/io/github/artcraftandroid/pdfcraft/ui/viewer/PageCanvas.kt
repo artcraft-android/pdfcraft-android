@@ -61,9 +61,6 @@ data class CanvasLook(
 /** Screen pixels a mouse wheel's notch scrolls (the reference's step). */
 private const val WHEEL_STEP = 100f
 
-/** The zoom one notch of Ctrl and the wheel makes. */
-private const val WHEEL_ZOOM = 1.25f
-
 /** How soon after one the wheel may turn another single page. */
 private const val WHEEL_TURN_MS = 800L
 
@@ -72,7 +69,8 @@ private const val WHEEL_TURN_MS = 800L
  * tap to zoom in or back out (and [onDoubleTap]), tap for [onTap] (bars), long press for [onLongPress]. [overlay]
  * draws over the pages in screen space (selection, search hits, comments being made). When
  * [gesturesEnabled] is false a tool above takes the touches itself. A mouse wheel scrolls (zooms
- * with Ctrl), and a mouse drag goes to [onMouseSelect] when there is one.
+ * with Ctrl, then [onWheelZoom]), a mouse drag goes to [onMouseSelect] when there is one, and a
+ * hovering mouse to [onMouseHover].
  */
 @Composable
 fun PageCanvas(
@@ -90,6 +88,10 @@ fun PageCanvas(
     onGestureStart: () -> Unit = {},
     /** A drag with the mouse's main button: from and to, on the page it began on (text selection). */
     onMouseSelect: ((PagePoint, PagePoint) -> Unit)? = null,
+    /** The mouse moved over the pages with no button down (screen position). */
+    onMouseHover: (Offset) -> Unit = {},
+    /** Ctrl and the wheel zoomed. */
+    onWheelZoom: () -> Unit = {},
     overlay: DrawScope.() -> Unit = {},
 ) {
     val density = LocalDensity.current
@@ -100,6 +102,8 @@ fun PageCanvas(
     val maxScale = with(density) { 4.dp.toPx() }
     val flinger = remember { arrayOfNulls<Job>(1) }
     val mouseSelect by rememberUpdatedState(onMouseSelect)
+    val mouseHover by rememberUpdatedState(onMouseHover)
+    val wheelZoom by rememberUpdatedState(onWheelZoom)
 
     // keep the renderers working on what is in view
     LaunchedEffect(state, images, generation) {
@@ -139,13 +143,17 @@ fun PageCanvas(
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
-                        if (event.type != PointerEventType.Scroll) continue
                         val change = event.changes.firstOrNull() ?: continue
+                        if (event.type == PointerEventType.Move && change.type == PointerType.Mouse && !change.pressed) mouseHover(change.position)
+                        if (event.type != PointerEventType.Scroll) continue
                         val d = change.scrollDelta
                         if (d == Offset.Zero) continue
                         flinger[0]?.cancel()
                         when {
-                            event.keyboardModifiers.isCtrlPressed -> state.zoomBy(if (d.y < 0f) WHEEL_ZOOM else 1f / WHEEL_ZOOM, change.position)
+                            event.keyboardModifiers.isCtrlPressed -> {
+                                state.zoomStep(if (d.y < 0f) 1 else -1, change.position)
+                                wheelZoom()
+                            }
                             state.mode == PageMode.SinglePage -> {
                                 val rest = state.scrollBy(0f, -d.y * WHEEL_STEP)
                                 if (rest.y != 0f && change.uptimeMillis - lastTurn > WHEEL_TURN_MS) {

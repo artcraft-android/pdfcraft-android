@@ -130,6 +130,18 @@ class ViewerState(pages: List<PageSize>) {
         return Offset(dx + (scrollX - ox), dy + (scrollY - oy))
     }
 
+    /**
+     * Zoom in ([steps] > 0) or out by [ZOOM_STEP] a step about [focus], as the zoom buttons, Ctrl
+     * and the wheel, and Ctrl and + or − do; a single page back at fit-width settles on its slot.
+     */
+    fun zoomStep(steps: Int, focus: Offset) {
+        zoomTo(zoom + steps * ZOOM_STEP, focus)
+        if (mode == PageMode.SinglePage && zoom <= MIN_ZOOM + 0.001f) goToPage(currentPage)
+    }
+
+    val canZoomIn: Boolean get() = zoom < maxZoom - 0.001f
+    val canZoomOut: Boolean get() = zoom > minZoom + 0.001f
+
     /** Zoom by [factor] about screen point [focus]. */
     fun zoomBy(factor: Float, focus: Offset) = zoomTo(zoom * factor, focus)
 
@@ -324,6 +336,9 @@ class ViewerState(pages: List<PageSize>) {
         const val LOWRES_BELOW = 0.6f
         const val LOWRES_LEVEL = -1
         const val MAX_ZOOM = 10f
+
+        /** What a zoom step adds or takes away (fit-width is 1), as the reference's step. */
+        const val ZOOM_STEP = 0.25f
         const val TILE = 512
         const val LEVEL_STEP = 1.4142135f
         private const val SNAP_VELOCITY = 400f

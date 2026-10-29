@@ -145,6 +145,26 @@ class ViewerGeometryTest {
     }
 
     @Test
+    fun zoomStepsAddAQuarterAndStopAtTheEnds() {
+        val s = state(List(3) { letter })
+        s.zoomStep(1, Offset.Zero)
+        assertEquals(1.25f, s.zoom, 0.0001f)
+        s.zoomStep(-2, Offset.Zero)
+        assertEquals(0.75f, s.zoom, 0.0001f)
+        assertTrue(s.canZoomIn && s.canZoomOut)
+        s.zoomTo(ViewerState.MAX_ZOOM, Offset.Zero)
+        assertTrue(!s.canZoomIn)
+        // a single page zoomed back out to fit-width settles on its own slot
+        s.switchMode(PageMode.SinglePage)
+        s.goToPage(1)
+        s.zoomStep(2, Offset(300f, 300f))
+        s.zoomStep(-2, Offset(300f, 300f))
+        assertEquals(1f, s.zoom, 0.0001f)
+        assertTrue(!s.canZoomOut)
+        assertEquals(s.viewW, s.scrollX, 0.5f)
+    }
+
+    @Test
     fun aDragOffItsPageIsHeldToThatPage() {
         val s = state(List(4) { letter })
         s.goToPage(1)
