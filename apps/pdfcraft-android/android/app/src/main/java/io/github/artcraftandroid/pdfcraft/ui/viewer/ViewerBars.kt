@@ -202,7 +202,8 @@ private fun ReadAloudSwitch(on: Boolean, onToggle: () -> Unit) {
 
 /**
  * Find in the top bar: collapse, the query field (searched on submit), then clear, Previous and
- * Next, greyed until they can be used. Like the reference, it shows no hit counter.
+ * Next, greyed until they can be used. Like the reference, it shows no hit counter, unless Extra
+ * Features asks for one: [count], "3 of 12", between the field and the buttons.
  */
 @Composable
 fun SearchBar(
@@ -214,6 +215,7 @@ fun SearchBar(
     onClose: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    count: String? = null,
 ) {
     val c = pdfColors
     val focus = remember { FocusRequester() }
@@ -254,6 +256,7 @@ fun SearchBar(
                 },
             )
         }
+        if (count != null) Text(count, color = c.textSecondary, fontSize = 15.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 4.dp))
         BarIcon(LucideIcons.X, stringResource(R.string.common_clear), onClear, size = 40.dp, enabled = query.isNotEmpty())
         BarIcon(LucideIcons.ChevronLeft, stringResource(R.string.viewer_find_previous), onPrev, enabled = canStep, size = 40.dp)
         BarIcon(LucideIcons.ChevronRight, stringResource(R.string.viewer_find_next), onNext, enabled = canStep, size = 40.dp)

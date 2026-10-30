@@ -230,6 +230,8 @@
     <string name="home_extra_body">Optional changes to how PdfCraft looks and works.</string>
     <string name="home_status_bar_in_documents">Show the status bar in documents</string>
     <string name="home_status_bar_in_documents_body">The status bar shows with the toolbars. When you tap to hide them, the page uses the whole screen, around the camera too.</string>
+    <string name="home_search_count">Show the number of search results</string>
+    <string name="home_search_count_body">Find in a document shows which result you\'re on and how many there are, such as 3 of 12.</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">About</string>
@@ -448,6 +450,7 @@
     <string name="viewer_edit_text">Edit text</string>
     <string name="viewer_zoom_in">Zoom in</string>
     <string name="viewer_zoom_out">Zoom out</string>
+    <string name="viewer_search_count">%1$d of %2$d</string>
     <string name="viewer_read_from_here">Read from here</string>
     <string name="viewer_copy_text">Copy text</string>
     <!-- Translator note: accessibility labels of the two handles at the ends of selected text. -->

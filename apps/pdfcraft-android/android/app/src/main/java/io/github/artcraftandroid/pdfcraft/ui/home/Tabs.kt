@@ -391,6 +391,11 @@ private fun Preferences(vm: AppViewModel) {
         PdfSwitch(vm.statusBarInDocuments, { vm.updateStatusBarInDocuments(it) })
     }
     Text(stringResource(R.string.home_status_bar_in_documents_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
+    Spacer(Modifier.height(8.dp))
+    SheetRow(null, stringResource(R.string.home_search_count), { vm.updateSearchCount(!vm.searchCount) }) {
+        PdfSwitch(vm.searchCount, { vm.updateSearchCount(it) })
+    }
+    Text(stringResource(R.string.home_search_count_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
     Spacer(Modifier.height(24.dp))
     if (authorDialog) {
         var name by remember { mutableStateOf(vm.toolPrefs.author) }

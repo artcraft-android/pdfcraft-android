@@ -853,6 +853,18 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
         appPrefs.edit().putBoolean("statusBarInDocuments", on).apply()
     }
 
+    /**
+     * Extra Features ▸ the number of search results: Find shows which result is on screen and how
+     * many there are, "3 of 12" (#39; the reference's page view shows no count).
+     */
+    var searchCount by mutableStateOf(appPrefs.getBoolean("searchCount", false))
+        private set
+
+    fun updateSearchCount(on: Boolean) {
+        searchCount = on
+        appPrefs.edit().putBoolean("searchCount", on).apply()
+    }
+
     // ---- Reading the document ---------------------------------------------------------------
 
     suspend fun outline(doc: OpenDocument) = engine?.let { e -> runCatching { e.command { outline(doc.id) } }.getOrNull() }.orEmpty()
