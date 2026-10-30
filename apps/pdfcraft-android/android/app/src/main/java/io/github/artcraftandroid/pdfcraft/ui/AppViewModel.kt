@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import io.github.artcraftandroid.pdfcraft.PdfcraftApplication
 import io.github.artcraftandroid.pdfcraft.R
@@ -59,8 +60,14 @@ data class PasswordRequest(val uri: Uri, val file: File, val wrong: Boolean)
 /** Script alerts waiting at once, at most. */
 private const val MAX_SCRIPT_ALERTS = 20
 
-/** The app's state: the engine, the open document, Home's lists, and the messages. */
-class AppViewModel(app: Application) : AndroidViewModel(app) {
+/** The saved-state key of the scan in progress. */
+private const val SCAN_STATE = "scan"
+
+/**
+ * The app's state: the engine, the open document, Home's lists, and the messages. [saved] keeps
+ * what must outlive Android closing the app in the background (the scan in progress).
+ */
+class AppViewModel(app: Application, private val saved: SavedStateHandle) : AndroidViewModel(app) {
     private val application = app as PdfcraftApplication
     val files = DocumentFiles(app)
     val recents = RecentFiles(File(app.filesDir, "recent.json"))
@@ -545,8 +552,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val center = androidx.compose.ui.geometry.Offset(v.viewW / 2f, v.viewH / 2f)
         when {
             ctrl && keyCode == android.view.KeyEvent.KEYCODE_P -> print(doc)
-            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_EQUALS || keyCode == android.view.KeyEvent.KEYCODE_PLUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ADD) -> v.zoomTo(v.zoom + 0.25f, center)
-            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_MINUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_SUBTRACT) -> v.zoomTo(v.zoom - 0.25f, center)
+            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_EQUALS || keyCode == android.view.KeyEvent.KEYCODE_PLUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ADD) -> v.zoomStep(1, center)
+            ctrl && (keyCode == android.view.KeyEvent.KEYCODE_MINUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_SUBTRACT) -> v.zoomStep(-1, center)
             ctrl -> return false
             keyCode == android.view.KeyEvent.KEYCODE_N || keyCode == android.view.KeyEvent.KEYCODE_PAGE_DOWN -> v.goToPage(v.currentPage + 1)
             keyCode == android.view.KeyEvent.KEYCODE_P || keyCode == android.view.KeyEvent.KEYCODE_PAGE_UP -> v.goToPage(v.currentPage - 1)
@@ -1905,6 +1912,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var shotFile: File? = null
     private var retakeIndex: Int? = null
 
+    // A scan Android closed the app in the middle of, while the camera app was in front, carries on
+    // when the photo comes back (#38): what it needs is kept in the saved state, read when it's saved.
+    private var scanRestoring: String? = null
+    private val scanRestore: kotlinx.coroutines.Job? = saved.get<android.os.Bundle>(SCAN_STATE)?.getString(SCAN_STATE)?.let { text ->
+        ScanSession.decode(text)?.let { restoreScan(text, it) }
+    }
+
+    init {
+        saved.setSavedStateProvider(SCAN_STATE) {
+            android.os.Bundle().apply { putString(SCAN_STATE, scanRestoring ?: scanSession()?.encode()) }
+        }
+    }
+
+    /** The scan in progress (or the Add image photo being taken); null when there is none. */
+    private fun scanSession(): ScanSession? {
+        if (shotFile == null && scanPages.isEmpty()) return null
+        return ScanSession(shotFile?.path, retakeIndex, imageShot, scanName, scanPages.map { ScanSession.Page(it.file.path, it.corners, it.found) })
+    }
+
+    private fun restoreScan(text: String, session: ScanSession): kotlinx.coroutines.Job {
+        scanRestoring = text
+        shotFile = session.shot?.let(::File)
+        retakeIndex = session.retake
+        imageShot = session.forImage
+        scanName = session.name
+        return viewModelScope.launch {
+            val pages = withContext(Dispatchers.IO) {
+                session.pages.mapNotNull { p -> File(p.path).let { f -> scanThumb(f)?.let { ScanPage(f, it, p.corners, p.found) } } }
+            }
+            scanPages.addAll(pages)
+            scanRestoring = null
+            // back on the Scan screen with its pages (with none, it would open the camera itself)
+            if (pages.isNotEmpty() && toolScreen == null) toolScreen = ToolScreen.Scan
+        }
+    }
+
+    /** A scanned photo, small and upright, for the Scan screen; null when it can't be read. */
+    private fun scanThumb(f: File): androidx.compose.ui.graphics.ImageBitmap? {
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }
+        return android.graphics.BitmapFactory.decodeFile(f.absolutePath, opts)?.let { rotateForExif(f, it) }?.asImageBitmap()
+    }
+
     /** Scan's pages go into this document at this (1-based) position instead of a new PDF. */
     var insertScanAt: Pair<OpenDocument, Int>? = null
     private var insertFileAt: Pair<OpenDocument, Int>? = null
@@ -2157,7 +2206,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         shotFile = null
         if (imageShot) {
             imageShot = false
-            if (!ok || !f.isFile || f.length() == 0L) {
+            // after Android closed the app, the document the picture was for isn't open any more
+            if (!ok || !f.isFile || f.length() == 0L || imageFor == null) {
+                f.delete()
                 imageFor = null
                 imageAt = null
                 return
@@ -2177,14 +2228,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         if (!ok || !f.isFile || f.length() == 0L) {
-            if (scanPages.isEmpty()) toolScreen = null
+            viewModelScope.launch {
+                scanRestore?.join()
+                if (scanPages.isEmpty()) toolScreen = null
+            }
             return
         }
         viewModelScope.launch {
-            val thumb = withContext(Dispatchers.IO) {
-                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }
-                android.graphics.BitmapFactory.decodeFile(f.absolutePath, opts)?.let { rotateForExif(f, it) }?.asImageBitmap()
-            } ?: return@launch
+            // the pages taken before Android closed the app come first
+            scanRestore?.join()
+            val thumb = withContext(Dispatchers.IO) { scanThumb(f) } ?: return@launch
             val page = ScanPage(f, thumb)
             val r = retakeIndex
             retakeIndex = null
@@ -2193,7 +2246,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (toolScreen != ToolScreen.Scan) toolScreen = ToolScreen.Scan
             // the document's edges in the photo, shown on the page and moved in Crop; the whole
             // photo is kept when none are found
-            val found = engine?.let { eng -> runCatching { eng.tool("photo_find_document", mapOf("path" to f.absolutePath)) }.getOrNull() }
+            // (the engine may still be starting when the app was closed and opened again)
+            val found = (engine ?: application.engine.await().getOrNull())?.let { eng -> runCatching { eng.tool("photo_find_document", mapOf("path" to f.absolutePath)) }.getOrNull() }
                 ?.takeIf { it.optBoolean("found") }?.optJSONArray("corners")?.takeIf { it.length() == 8 }
                 ?.let { a -> FloatArray(8) { a.optDouble(it).toFloat() } }
             val at = scanPages.indexOfFirst { it.file == f }

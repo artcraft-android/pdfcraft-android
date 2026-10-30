@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import io.github.artcraftandroid.pdfcraft.core.TextRange
 import io.github.artcraftandroid.pdfcraft.engine.Engine
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -15,7 +16,7 @@ data class Selection(val range: TextRange, val rects: List<FloatArray>, val star
 
 /**
  * Text selection: a long press selects the word under the finger, the handles at either end
- * extend it glyph by glyph. A selection stays on one page, as a phone screen shows one page's
+ * extend it glyph by glyph, and a mouse drag selects the text it crosses. A selection stays on one page, as a phone screen shows one page's
  * text at a time.
  */
 @Stable
@@ -35,6 +36,32 @@ class TextSelectionState(private val engine: Engine, private val doc: ULong, pri
         anchor = range.start.toInt()
         show(range)
         return true
+    }
+
+    // the latest mouse drag waiting to be shown, and the work showing one (one at a time)
+    private var span: Pair<PagePoint, PagePoint>? = null
+    private var spanJob: Job? = null
+
+    /**
+     * A mouse drag from [from] to [to] on one page: the text between them, as a desktop selects.
+     * Moves arrive faster than the engine answers, so only the latest is shown.
+     */
+    fun selectSpan(from: PagePoint, to: PagePoint) {
+        span = from to to
+        if (spanJob?.isActive == true) return
+        spanJob = scope.launch {
+            while (true) {
+                val (a, b) = span ?: break
+                span = null
+                val page = a.page.toUInt()
+                val (ga, gb) = withContext(engine.commands) {
+                    engine.session.nearestGlyph(doc, page, a.x, a.y) to engine.session.nearestGlyph(doc, page, b.x, b.y)
+                }
+                if (ga == null || gb == null) continue
+                anchor = ga.toInt()
+                show(TextRange(page, minOf(ga, gb), maxOf(ga, gb) + 1u))
+            }
+        }
     }
 
     /** Select all the text of [page]. */

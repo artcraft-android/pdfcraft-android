@@ -145,6 +145,45 @@ class ViewerGeometryTest {
     }
 
     @Test
+    fun zoomStepsAddAQuarterAndStopAtTheEnds() {
+        val s = state(List(3) { letter })
+        s.zoomStep(1, Offset.Zero)
+        assertEquals(1.25f, s.zoom, 0.0001f)
+        s.zoomStep(-2, Offset.Zero)
+        assertEquals(0.75f, s.zoom, 0.0001f)
+        assertTrue(s.canZoomIn && s.canZoomOut)
+        s.zoomTo(ViewerState.MAX_ZOOM, Offset.Zero)
+        assertTrue(!s.canZoomIn)
+        // a single page zoomed back out to fit-width settles on its own slot
+        s.switchMode(PageMode.SinglePage)
+        s.goToPage(1)
+        s.zoomStep(2, Offset(300f, 300f))
+        s.zoomStep(-2, Offset(300f, 300f))
+        assertEquals(1f, s.zoom, 0.0001f)
+        assertTrue(!s.canZoomOut)
+        assertEquals(s.viewW, s.scrollX, 0.5f)
+    }
+
+    @Test
+    fun aDragOffItsPageIsHeldToThatPage() {
+        val s = state(List(4) { letter })
+        s.goToPage(1)
+        val top = s.pageToScreen(1, 0f, 0f)
+        // the gap above page 1 belongs to no page, but a drag that began on page 1 stays on it
+        val above = Offset(top.x + 50f, top.y - 10f)
+        assertNull(s.screenToPage(above))
+        val held = s.screenToPageOf(1, above)!!
+        assertEquals(1, held.page)
+        assertEquals(0f, held.y, 0.001f)
+        // and past the page's far corner, it is held to that corner
+        val far = s.pageToScreen(1, 612f, 792f) + Offset(40f, 40f)
+        val corner = s.screenToPageOf(1, far)!!
+        assertEquals(612f, corner.x, 0.001f)
+        assertEquals(792f, corner.y, 0.001f)
+        assertNull(s.screenToPageOf(9, above))
+    }
+
+    @Test
     fun currentPageFollowsScroll() {
         val s = state(List(10) { letter })
         assertEquals(0, s.currentPage)

@@ -164,6 +164,12 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
 
     val search = doc.search
     val selection = doc.selection
+    // on a desktop, zoom buttons at the bottom right: with the bars, or for a moment when the mouse
+    // comes near the corner or the wheel zooms, as the reference has them
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    val desktop = remember(config) { isDesktop(context, config) }
+    val zoomButtons = remember(doc) { ZoomButtonsState(scope) }
+    LaunchedEffect(ctl.barsVisible) { if (!ctl.barsVisible) zoomButtons.hide() }
     val canvasLook = CanvasLook(background = c.desk, pageShadow = c.pageEdge, invert = ctl.nightMode)
 
     BackHandler(enabled = ctl.searching || ctl.tool != ViewerTool.None || selection.selection != null) {
@@ -219,6 +225,14 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
             },
             // a double tap zooms with the bars out of the way, as the reference's does
             onDoubleTap = { if (ctl.tool == ViewerTool.None && !ctl.searching) ctl.barsVisible = false },
+            // with no tool out, a mouse drag selects text, as a desktop does
+            onMouseSelect = if (ctl.tool == ViewerTool.None) selection::selectSpan else null,
+            onMouseHover = { p ->
+                val v = doc.viewer
+                val corner = with(density) { p.x > v.viewW - ZOOM_CORNER_WIDTH.toPx() && p.y > v.viewH - ZOOM_CORNER_HEIGHT.toPx() }
+                if (desktop && corner) zoomButtons.poke()
+            },
+            onWheelZoom = { if (desktop) zoomButtons.poke() },
             onLongPress = { p, at ->
                 if (at != null) scope.launch {
                     val slop = 12f / doc.viewer.pixelsPerPoint(at.page).coerceAtLeast(0.1f) * density.density
@@ -271,6 +285,15 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                 onTap = { ctl.goToPage = true },
             )
         }
+
+        if (desktop && !vm.readingMode) ZoomButtons(
+            doc.viewer,
+            visible = ctl.tool == ViewerTool.None && !ctl.searching && (ctl.barsVisible || zoomButtons.showing),
+            // above the bottom bar when it shows
+            bottom = maxOf(122.dp, with(density) { doc.viewer.padBottom.toDp() } + 12.dp),
+            onHover = { if (!ctl.barsVisible) zoomButtons.poke() },
+            modifier = Modifier.align(Alignment.BottomEnd),
+        )
 
         HintToast(hint)
 
