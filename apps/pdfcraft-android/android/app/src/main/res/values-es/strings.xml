@@ -229,6 +229,8 @@
     <string name="home_extra_body">Cambios opcionales en el aspecto y el funcionamiento de PdfCraft.</string>
     <string name="home_status_bar_in_documents">Mostrar la barra de estado en los documentos</string>
     <string name="home_status_bar_in_documents_body">La barra de estado se muestra con las barras de herramientas. Al tocar para ocultarlas, la página ocupa toda la pantalla, también alrededor de la cámara.</string>
+    <string name="home_search_count">Mostrar el número de resultados de búsqueda</string>
+    <string name="home_search_count_body">Buscar en un documento muestra en qué resultado estás y cuántos hay, por ejemplo 3 de 12.</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">Acerca de</string>
@@ -447,6 +449,7 @@
     <string name="viewer_edit_text">Editar texto</string>
     <string name="viewer_zoom_in">Acercar</string>
     <string name="viewer_zoom_out">Alejar</string>
+    <string name="viewer_search_count">%1$d de %2$d</string>
     <string name="viewer_read_from_here">Leer desde aquí</string>
     <string name="viewer_copy_text">Copiar texto</string>
     <!-- Translator note: accessibility labels of the two handles at the ends of selected text. -->

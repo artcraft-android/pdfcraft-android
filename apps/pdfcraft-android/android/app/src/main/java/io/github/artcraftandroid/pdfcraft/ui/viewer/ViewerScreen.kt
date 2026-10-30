@@ -351,6 +351,11 @@ fun ViewerScreen(vm: AppViewModel, doc: OpenDocument) {
                         onClose = { closeSearch(doc) },
                         onPrev = { search.step(false)?.let { showHit(doc, it) } },
                         onNext = { search.step(true)?.let { showHit(doc, it) } },
+                        // Extra Features: which result is on screen, of how many (still growing while
+                        // the rest of a long document is searched)
+                        count = if (vm.searchCount && search.hits.isNotEmpty()) {
+                            stringResource(R.string.viewer_search_count, (search.current + 1).coerceAtLeast(1), search.hits.size)
+                        } else null,
                     )
                 } else {
                     val fa = vm.fieldActions
