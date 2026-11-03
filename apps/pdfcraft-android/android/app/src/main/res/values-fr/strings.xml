@@ -1008,6 +1008,7 @@
     <string name="msg_rename_not_here">Ce fichier ne peut pas être renommé ici.</string>
     <string name="msg_duplicated">Dupliqué sous %1$s dans Téléchargements</string>
     <string name="msg_delete_failed">Impossible de supprimer le fichier.</string>
+    <string name="msg_delete_not_allowed">%1$s ne peut pas être supprimé depuis PdfCraft : l\'app depuis laquelle vous l\'avez ouvert ne le permet pas. Supprimez-le dans cette app ou retirez-le des fichiers récents.</string>
     <string name="msg_file_deleted">%1$s supprimé</string>
 
     <!-- ================================================================== -->

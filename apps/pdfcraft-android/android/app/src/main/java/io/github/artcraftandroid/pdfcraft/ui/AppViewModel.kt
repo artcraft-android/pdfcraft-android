@@ -2683,20 +2683,44 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
             val u = Uri.parse(row.key)
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
-                    when {
-                        u.scheme == "file" -> require(File(requireNotNull(u.path)).delete()) { text(R.string.msg_delete_failed) }
-                        u.authority == android.provider.MediaStore.AUTHORITY ->
-                            require(getApplication<Application>().contentResolver.delete(u, null, null) > 0) { text(R.string.msg_delete_failed) }
-                        else -> require(android.provider.DocumentsContract.deleteDocument(getApplication<Application>().contentResolver, u)) { text(R.string.msg_delete_failed) }
+                    val app = getApplication<Application>()
+                    val deleted = try {
+                        when {
+                            u.scheme == "file" -> File(requireNotNull(u.path)).delete()
+                            u.authority == android.provider.MediaStore.AUTHORITY -> app.contentResolver.delete(u, null, null) > 0
+                            android.provider.DocumentsContract.isDocumentUri(app, u) -> android.provider.DocumentsContract.deleteDocument(app.contentResolver, u)
+                            // another app's own file link (a file manager's Open with): only that app can say
+                            else -> app.contentResolver.delete(u, null, null) > 0
+                        }
+                    } catch (e: SecurityException) {
+                        false
+                    } catch (e: IllegalArgumentException) {
+                        false
+                    } catch (e: UnsupportedOperationException) {
+                        false
+                    } catch (e: java.io.FileNotFoundException) {
+                        false
                     }
+                    if (!deleted) throw CannotDelete()
                     recents.remove(setOf(row.key))
                 }
             }
-            ok.onFailure { tell(it.userMessage) }.onSuccess { tell(text(R.string.msg_file_deleted, row.name)) }
+            // A file another app lent (#53): Android's own error named the app's file provider. Say
+            // it in words, and offer what PdfCraft can do: take it off Recent.
+            ok.onFailure { e ->
+                if (e is CannotDelete && u.scheme == "content" && u.authority != android.provider.MediaStore.AUTHORITY && recentList.any { it.uri == row.key }) {
+                    tell(text(R.string.msg_delete_not_allowed, row.name), text(R.string.home_remove_from_recent)) { removeRecent(row.key) }
+                } else {
+                    tell(if (e is CannotDelete) text(R.string.msg_delete_failed) else e.userMessage)
+                }
+            }.onSuccess { tell(text(R.string.msg_file_deleted, row.name)) }
             refreshRecents()
             scanLocal(force = true)
         }
     }
+
+    /** A file the place it's kept wouldn't delete. */
+    private class CannotDelete : Exception()
 
     /** Photos: pick pictures and make them into a PDF (Create PDF from the photo picker). */
     val photoPicks = Channel<Unit>(Channel.CONFLATED)

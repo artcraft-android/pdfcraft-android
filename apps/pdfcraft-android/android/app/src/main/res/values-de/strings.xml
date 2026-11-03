@@ -1114,6 +1114,7 @@
     <string name="msg_rename_not_here">Diese Datei kann hier nicht umbenannt werden.</string>
     <string name="msg_duplicated">Als %1$s in „Downloads“ dupliziert</string>
     <string name="msg_delete_failed">Die Datei konnte nicht gelöscht werden.</string>
+    <string name="msg_delete_not_allowed">%1$s kann nicht in PdfCraft gelöscht werden: Die App, aus der du die Datei geöffnet hast, erlaubt es nicht. Lösche sie dort oder entferne sie aus „Zuletzt verwendet“.</string>
     <string name="msg_file_deleted">%1$s gelöscht</string>
 
     <!-- ================================================================== -->

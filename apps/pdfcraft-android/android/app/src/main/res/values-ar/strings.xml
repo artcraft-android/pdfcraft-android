@@ -775,6 +775,7 @@
     <string name="msg_rename_not_here">لا يمكن إعادة تسمية هذا الملف هنا.</string>
     <string name="msg_duplicated">أُنشئت نسخة باسم %1$s في التنزيلات</string>
     <string name="msg_delete_failed">تعذّر حذف الملف.</string>
+    <string name="msg_delete_not_allowed">لا يمكن حذف %1$s من PdfCraft: التطبيق الذي فتحته منه لا يسمح بذلك. احذفه من هناك أو أزله من الأخيرة.</string>
     <string name="msg_file_deleted">تم حذف %1$s</string>
     <string name="files_error_needs_password">هذا المستند محمي بكلمة مرور.</string>
     <string name="files_error_generic">حدث خطأ ما.</string>

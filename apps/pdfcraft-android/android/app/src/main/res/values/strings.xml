@@ -1124,6 +1124,7 @@
     <string name="msg_rename_not_here">This file can\'t be renamed here.</string>
     <string name="msg_duplicated">Duplicated as %1$s in Downloads</string>
     <string name="msg_delete_failed">The file couldn\'t be deleted.</string>
+    <string name="msg_delete_not_allowed">%1$s can\'t be deleted from PdfCraft: the app you opened it from doesn\'t allow it. Delete it there, or remove it from Recent.</string>
     <string name="msg_file_deleted">%1$s deleted</string>
 
     <!-- ================================================================== -->

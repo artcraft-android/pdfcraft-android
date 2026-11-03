@@ -1122,6 +1122,7 @@
     <string name="msg_rename_not_here">Este archivo no se puede cambiar de nombre aquí.</string>
     <string name="msg_duplicated">Duplicado como %1$s en Descargas</string>
     <string name="msg_delete_failed">No se pudo eliminar el archivo.</string>
+    <string name="msg_delete_not_allowed">%1$s no se puede eliminar desde PdfCraft: la app desde la que lo abriste no lo permite. Elimínalo allí o quítalo de Recientes.</string>
     <string name="msg_file_deleted">%1$s eliminado</string>
 
     <!-- ================================================================== -->
