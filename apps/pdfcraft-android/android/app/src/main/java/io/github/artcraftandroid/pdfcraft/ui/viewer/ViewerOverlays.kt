@@ -57,6 +57,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -93,6 +94,7 @@ fun BoxScope.Scrubber(doc: OpenDocument, visible: Boolean, top: Dp, bottom: Dp, 
     val v = doc.viewer
     val density = LocalDensity.current
     var dragging by remember { mutableStateOf(false) }
+    ScrubPageBox(dragging, v.currentPage + 1, doc.pageCount)
     AnimatedVisibility(visible || dragging, modifier = Modifier.align(Alignment.TopEnd), enter = fadeIn(tween(150)), exit = fadeOut(tween(300))) {
         BoxWithConstraints(Modifier.fillMaxSize().padding(top = top + 8.dp, bottom = bottom + 8.dp)) {
             val track = with(density) { maxHeight.toPx() }
@@ -130,6 +132,28 @@ fun BoxScope.Scrubber(doc: OpenDocument, visible: Boolean, top: Dp, bottom: Dp, 
             ) {
                 Text(label, color = c.text, fontSize = 15.sp, modifier = Modifier.padding(start = 12.dp, end = 10.dp))
             }
+        }
+    }
+}
+
+/**
+ * While a scrubber is dragged, the page it has reached in a dark box in the middle of the screen,
+ * where the finger on the scrubber doesn't hide it: the number large, a line, then "of N" (#26).
+ * It fades soon after the finger lifts.
+ */
+@Composable
+private fun BoxScope.ScrubPageBox(visible: Boolean, page: Int, pages: Int) {
+    AnimatedVisibility(visible, modifier = Modifier.align(Alignment.Center), enter = fadeIn(tween(100)), exit = fadeOut(tween(250))) {
+        Column(
+            Modifier.size(106.dp, 112.dp).background(Color(0xE6262626), RoundedCornerShape(5.dp)).clearAndSetSemantics {},
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(20.dp))
+            Text("$page", color = Color.White, fontSize = 28.sp, maxLines = 1)
+            Spacer(Modifier.height(8.dp))
+            Box(Modifier.size(70.dp, 1.dp).background(Color(0x59FFFFFF)))
+            Spacer(Modifier.height(5.dp))
+            Text(stringResource(R.string.viewer_scrub_of, pages), color = Color.White, fontSize = 18.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, maxLines = 1)
         }
     }
 }
@@ -433,6 +457,7 @@ fun BoxScope.HorizontalScrubber(doc: OpenDocument, visible: Boolean, bottom: Dp,
     val density = LocalDensity.current
     var dragging by remember { mutableStateOf(false) }
     var dragX by remember { mutableFloatStateOf(0f) }
+    ScrubPageBox(dragging, v.currentPage + 1, doc.pageCount)
     AnimatedVisibility(visible || dragging, modifier = Modifier.align(Alignment.BottomCenter), enter = fadeIn(tween(150)), exit = fadeOut(tween(300))) {
         BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = bottom + 12.dp).height(32.dp)) {
             val track = with(density) { maxWidth.toPx() }

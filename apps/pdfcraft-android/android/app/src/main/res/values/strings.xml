@@ -437,6 +437,8 @@
     <!-- Viewer: the scrubber and Go to page -->
     <!-- Translator note: %1$d is the current page number, %2$d the number of pages. -->
     <string name="viewer_page_of">Page %1$d of %2$d</string>
+    <!-- Under the page number in the box shown while the scrubber is dragged: "of 42" -->
+    <string name="viewer_scrub_of">of %1$d</string>
     <string name="viewer_go_to_page">Go to page</string>
     <!-- Translator note: the range of page numbers that can be entered; %1$d is the last page. -->
     <string name="viewer_go_to_page_range">1 - %1$d</string>

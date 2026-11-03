@@ -432,6 +432,7 @@
     <!-- Navigazione tra le pagine -->
 
     <string name="viewer_page_of">Pagina %1$d di %2$d</string>
+    <string name="viewer_scrub_of">di %1$d</string>
     <string name="viewer_go_to_page">Vai alla pagina</string>
     <string name="viewer_go_to_page_range">1 - %1$d</string>
     <string name="viewer_enter_page_number">Inserisci il numero di pagina</string>

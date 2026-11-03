@@ -419,6 +419,7 @@
 
     <!-- Viewer: the scrubber and Go to page -->
     <string name="viewer_page_of">Page %1$d sur %2$d</string>
+    <string name="viewer_scrub_of">sur %1$d</string>
     <string name="viewer_go_to_page">Aller à la page</string>
     <string name="viewer_go_to_page_range">1 - %1$d</string>
     <string name="viewer_enter_page_number">Saisir le numéro de page</string>
