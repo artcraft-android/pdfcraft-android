@@ -32,7 +32,7 @@
     <string name="common_tool_set_password">Nastaviť heslo</string>
     <string name="common_tool_organize">Usporiadať strany</string>
     <string name="common_tool_create_pdf">Vytvoriť PDF</string>
-    <string name="common_tool_compress">Komprimovať PDF</string>
+    <string name="common_tool_compress">Kompresovať PDF</string>
     <string name="common_tool_export">Exportovať PDF</string>
     <string name="common_tool_crop">Orezať strany</string>
     <string name="common_tool_fill_sign">Vyplniť a podpísať</string>
