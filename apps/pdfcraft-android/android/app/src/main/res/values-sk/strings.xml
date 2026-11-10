@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name"></string>
     <string name="open_with">Otvoriť v PdfCraft</string>
     <string name="common_ok">OK</string>
     <string name="common_cancel">Zrušiť</string>
@@ -297,6 +296,7 @@
     <string name="viewer_image_from_camera">Z kamery</string>
     <string name="viewer_close">Zavrieť</string>
     <string name="viewer_page_of">Strana %1$d z %2$d</string>
+    <string name="viewer_scrub_of">z %1$d</string>
     <string name="viewer_go_to_page">Prejsť na stránku</string>
     <string name="viewer_go_to_page_range">1 - %1$d</string>
     <string name="viewer_enter_page_number">Zadať číslo strany</string>
@@ -748,6 +748,7 @@
     <string name="msg_rename_not_here">Tento súbor sa tu nemôže premenovať.</string>
     <string name="msg_duplicated">Duplikované ako %1$s v priečinku Stiahnuté</string>
     <string name="msg_delete_failed">Súbor sa nepodarilo odstrániť.</string>
+    <string name="msg_delete_not_allowed">%1$s sa nedá odstrániť v aplikácii PdfCraft: aplikácia, z ktorej ste ho otvorili, to nepovoľuje. Odstráňte ho tam alebo ho odstráňte z nedávnych.</string>
     <string name="msg_file_deleted">%1$s odstránený</string>
     <string name="files_error_needs_password">Tento dokument je chránený heslom.</string>
     <string name="files_error_generic">Niečo sa pokazilo.</string>
