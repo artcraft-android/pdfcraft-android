@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalContext
@@ -112,7 +113,9 @@ fun ToolLayer(vm: AppViewModel, doc: OpenDocument) {
 
 /**
  * The gesture split every tool layer shares: [onOne] gets a one-finger gesture (down, moves, up,
- * or cancelled when a second finger joins), two fingers pan and zoom the view.
+ * or cancelled when a second finger joins), two fingers pan and zoom the view. With [penDraws]
+ * (Draw, #35), once a stylus has touched the page a finger only scrolls, so a resting hand
+ * doesn't draw; a stylus, or its eraser end, always acts.
  */
 fun Modifier.toolGestures(
     doc: OpenDocument,
@@ -120,9 +123,26 @@ fun Modifier.toolGestures(
     onMove: (Offset) -> Unit,
     onUp: (Offset, moved: Boolean) -> Unit,
     onCancel: () -> Unit,
-): Modifier = pointerInput(doc) {
+    penDraws: Boolean = false,
+): Modifier = pointerInput(doc, penDraws) {
+    var penSeen = false
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
+        val pen = down.type == PointerType.Stylus || down.type == PointerType.Eraser
+        if (pen) penSeen = true
+        if (penDraws && penSeen && !pen) {
+            // a finger after the pen: scroll and zoom only
+            while (true) {
+                val event = awaitPointerEvent()
+                if (event.changes.none { it.pressed }) break
+                val zoom = event.calculateZoom()
+                if (zoom != 1f) doc.viewer.zoomBy(zoom, event.calculateCentroid())
+                val pan = event.calculatePan()
+                if (pan != Offset.Zero) doc.viewer.scrollBy(pan.x, pan.y)
+                event.changes.forEach { if (it.positionChanged()) it.consume() }
+            }
+            return@awaitEachGesture
+        }
         var one = true
         var moved = false
         var last = down.position
@@ -262,6 +282,7 @@ private fun DrawLayer(vm: AppViewModel, doc: OpenDocument) {
                 current?.let { strokes.remove(it) }
                 current = null
             },
+            penDraws = true,
         ),
     ) {
         Canvas(Modifier.fillMaxSize()) {
