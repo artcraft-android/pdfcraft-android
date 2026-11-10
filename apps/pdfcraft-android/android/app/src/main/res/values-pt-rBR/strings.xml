@@ -570,6 +570,7 @@
     <string name="toolbar_strikethrough">Tachado</string>
     <string name="toolbar_no_text_to_mark">Não há texto para marcar nesta página. Reconheça o texto primeiro (Mais ferramentas ▸ Reconhecer texto).</string>
     <string name="toolbar_draw_freeform">Desenho à mão livre</string>
+    <string name="toolbar_eraser">Borracha</string>
     <string name="toolbar_line_thickness">Espessura da linha</string>
     <string name="toolbar_snap_to_shape">Ajustar à forma</string>
     <string name="toolbar_snap_on">Ajuste à forma ativado</string>

@@ -831,6 +831,7 @@
     <!-- Disegno -->
 
     <string name="toolbar_draw_freeform">Disegno a mano libera</string>
+    <string name="toolbar_eraser">Gomma</string>
     <string name="toolbar_line_thickness">Spessore linea</string>
     <string name="toolbar_snap_to_shape">Adatta alla forma</string>
     <string name="toolbar_snap_on">Adattamento alla forma attivo</string>

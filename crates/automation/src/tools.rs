@@ -933,6 +933,17 @@ pub fn tools() -> Vec<ToolDef> {
         )),
         t("comment_image_preview", "Preview image signature layers", "Return a PNG of the page without the selected image signature/initials (layer=background, default), or its embedded image with alpha (layer=image). Includes the displayed rectangle, document rotation, image_rotation (how far clockwise the image is shown turned) and annotation opacity. Cache these layers for live placement/resizing; commit once with comment_edit. Does not change the document or undo history.")
             .ro().with(schema(comment_ref(json!({ "layer": { "type": "string", "enum": ["background", "image"], "default": "background" }, "dpi": { "type": "number", "minimum": 1, "maximum": 600, "default": 96 } })), &["doc"])),
+        t("comment_erase", "Erase part of drawings", "The Eraser: rub out the parts of the drawings (ink comments) on a page within radius points of path, splitting strokes where the path cuts them. A drawing with nothing left is deleted, a locked one is left alone. One undoable step, as the Eraser in PdfCraft; returns how many drawings the path came near (0: nothing changed).")
+            .destructive()
+            .with(schema(
+                json!({
+                    "doc": doc(),
+                    "page": { "type": "integer", "minimum": 1 },
+                    "path": { "type": "array", "items": point(), "minItems": 1, "description": "The eraser's path: [x, y] points from the top-left of the page." },
+                    "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 200, "description": "How far from the path it erases, in points. Default 6." },
+                }),
+                &["doc", "page", "path"],
+            )),
         t("comment_delete", "Delete a comment", "Delete a comment with its pop-up and replies, or one reply (its id, or page and index, from comment_list) with its pop-up and the replies to it; the comment and its other replies stay. Undoable.").destructive().with(schema(comment_ref(json!({})), &["doc"])),
         t(
             "doc_protect",

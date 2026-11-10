@@ -54,6 +54,9 @@ class ViewerController {
 
     var sheet by mutableStateOf(ViewerSheet.None)
 
+    /** Draw's Eraser is chosen instead of the pen (#57). */
+    var drawEraser by mutableStateOf(false)
+
     /** The active tool's open picker (colour, thickness, text size), and Fill & Sign's Sign panel. */
     var picker by mutableStateOf(Picker.None)
     var signPanel by mutableStateOf(false)

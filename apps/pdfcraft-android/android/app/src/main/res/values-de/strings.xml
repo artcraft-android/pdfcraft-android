@@ -846,6 +846,7 @@
 
     <!-- Draw tool -->
     <string name="toolbar_draw_freeform">Freihand zeichnen</string>
+    <string name="toolbar_eraser">Radierer</string>
     <string name="toolbar_line_thickness">Linienstärke</string>
     <!-- Note: a setting that turns hand-drawn strokes into clean lines, boxes, ovals and polygons -->
     <string name="toolbar_snap_to_shape">An Form ausrichten</string>

@@ -774,6 +774,7 @@
 
     <!-- Draw tool -->
     <string name="toolbar_draw_freeform">Dessin à main levée</string>
+    <string name="toolbar_eraser">Gomme</string>
     <string name="toolbar_line_thickness">Épaisseur du trait</string>
     <string name="toolbar_snap_to_shape">Magnétisme des formes</string>
     <string name="toolbar_snap_on">Magnétisme des formes activé</string>

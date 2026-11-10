@@ -586,6 +586,7 @@
     <string name="toolbar_strikethrough">Prečiarknuté</string>
     <string name="toolbar_no_text_to_mark">Táto stránka neobsahuje text na označenie. Najprv rozpoznajte text (Ďalšie nástroje ▸ Rozpoznať text).</string>
     <string name="toolbar_draw_freeform">Kresliť voľnou rukou</string>
+    <string name="toolbar_eraser">Guma</string>
     <string name="toolbar_line_thickness">Hrúbka čiary</string>
     <string name="toolbar_snap_to_shape">Prichytiť k tvaru</string>
     <string name="toolbar_snap_on">Prichytenie k tvaru zapnuté</string>

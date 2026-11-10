@@ -2150,6 +2150,33 @@ fn comments_through_tools() {
 }
 
 #[test]
+fn erasing_part_of_a_drawing_through_tools() {
+    let dir = workdir("erase-ink");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_create", json!({ "from": "blank", "width": 600, "height": 400 }))["doc"].as_u64().unwrap();
+    let count = |a: &mut Automation| ok(a, "comment_list", json!({ "doc": doc }))["count"].as_u64().unwrap();
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "ink", "strokes": [[[100, 200], [500, 200]]] }));
+    ok(&mut a, "comment_add", json!({ "doc": doc, "page": 1, "type": "ink", "strokes": [[[100, 300], [500, 300]]] }));
+    // across both in the middle: each is cut in two, still two drawings, in one undo step
+    let cut = ok(&mut a, "comment_erase", json!({ "doc": doc, "page": 1, "path": [[300, 150], [300, 350]] }));
+    assert_eq!(cut["drawings"], 2, "{cut}");
+    assert_eq!(count(&mut a), 2);
+    // nowhere near them: nothing changes, and no step joins the history
+    assert_eq!(ok(&mut a, "comment_erase", json!({ "doc": doc, "page": 1, "path": [[50, 50]] }))["drawings"], 0);
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    assert_eq!(count(&mut a), 1, "the second undo takes back the second drawing, not an empty erase");
+    ok(&mut a, "edit_redo", json!({ "doc": doc }));
+    // bad paths
+    for path in [json!([]), json!([[1]]), json!("x")] {
+        assert!(matches!(a.call("comment_erase", &json!({ "doc": doc, "page": 1, "path": path })), Err(ToolError::InvalidArgs(_))));
+    }
+    // all along the first: nothing is left of it, so that drawing goes
+    ok(&mut a, "comment_erase", json!({ "doc": doc, "page": 1, "path": [[90, 200], [510, 200]], "radius": 10 }));
+    assert_eq!(count(&mut a), 1);
+}
+
+#[test]
 fn freehand_highlight_through_tools() {
     let dir = workdir("freehand-highlight");
     let mut a = auto(&dir);

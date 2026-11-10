@@ -607,6 +607,7 @@
     <string name="toolbar_strikethrough">شطب</string>
     <string name="toolbar_no_text_to_mark">لا يوجد نص قابل للتحديد في هذه الصفحة. استخدم التعرّف على النص أولًا من «المزيد من الأدوات».</string>
     <string name="toolbar_draw_freeform">رسم حر</string>
+    <string name="toolbar_eraser">ممحاة</string>
     <string name="toolbar_line_thickness">سُمك الخط</string>
     <string name="toolbar_snap_to_shape">تحويل الرسم إلى شكل</string>
     <string name="toolbar_snap_on">تحويل الرسم إلى شكل: مفعّل</string>

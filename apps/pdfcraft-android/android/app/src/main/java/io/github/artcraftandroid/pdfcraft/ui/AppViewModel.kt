@@ -418,6 +418,15 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
         }
     }
 
+    /**
+     * The Eraser (#57): rub [path] (points on page [page]) out of the drawings it crosses, within
+     * [radius] points: one step of the document's history, as the desktop's Eraser.
+     */
+    fun eraseInk(doc: OpenDocument, page: Int, path: List<androidx.compose.ui.geometry.Offset>, radius: Float) {
+        if (path.isEmpty()) return
+        runTool(doc, "comment_erase", mapOf("page" to page + 1, "path" to path.map { listOf(it.x.toDouble(), it.y.toDouble()) }, "radius" to radius.toDouble()))
+    }
+
     /** Undo: inside a tool that keeps its own history (Draw) only that; else the document's last edit, named in a message. */
     fun undo(doc: OpenDocument) {
         doc.localUndo?.let { it.undo(); return }

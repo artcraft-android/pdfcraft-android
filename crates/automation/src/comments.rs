@@ -70,6 +70,9 @@ fn hex(c: [f32; 3]) -> String {
     format!("#{:02X}{:02X}{:02X}", b(c[0]), b(c[1]), b(c[2]))
 }
 
+/// The most points an eraser path may have (a long drag is a few hundred).
+const MAX_ERASER_POINTS: usize = 20_000;
+
 fn to_user(p: &PageInfo, x: f64, y: f64) -> [f64; 2] {
     let [ux, uy] = p.view_to_user(x as f32, y as f32);
     [ux as f64, uy as f64]
@@ -708,6 +711,57 @@ impl Automation {
     pub(crate) fn comment_delete(&mut self, a: &Args) -> Result<Value> {
         let (page, index) = self.comment_target(a)?;
         self.apply(a, Edit::DeleteAnnotation { page, index })
+    }
+
+    /// The Eraser on page `page`: `path` is in page points from the top-left. The drawings whose
+    /// box comes within `radius` of it are erased together, one undo step, later ones first (an
+    /// emptied drawing is deleted, which moves the ones after it), as the desktop's eraser does.
+    pub(crate) fn comment_erase(&mut self, a: &Args) -> Result<Value> {
+        let page = self.page(a)?;
+        let info = self.doc(a)?.info.pages.get(page).cloned().ok_or_else(|| failed(format!("no page {}", page.saturating_add(1))))?;
+        let wrong = || ToolError::InvalidArgs("path must be an array of [x, y] points".into());
+        let path = a
+            .get("path")
+            .and_then(Value::as_array)
+            .ok_or_else(wrong)?
+            .iter()
+            .map(|p| match p.as_array().map(|p| p.iter().map(Value::as_f64).collect::<Vec<_>>()).as_deref() {
+                Some([Some(x), Some(y)]) if x.is_finite() && y.is_finite() => Ok(to_user(&info, *x, *y)),
+                _ => Err(wrong()),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if path.is_empty() || path.len() > MAX_ERASER_POINTS {
+            return Err(ToolError::InvalidArgs(format!("path needs 1 to {MAX_ERASER_POINTS} points")));
+        }
+        let radius = match a.get("radius") {
+            None | Some(Value::Null) => 6.0,
+            Some(v) => v
+                .as_f64()
+                .filter(|r| r.is_finite() && *r > 0.0 && *r <= 200.0)
+                .ok_or_else(|| ToolError::InvalidArgs("radius must be a number above 0, at most 200".into()))?,
+        };
+        let b = path.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |r, p| [r[0].min(p[0]), r[1].min(p[1]), r[2].max(p[0]), r[3].max(p[1])]);
+        let mut hits: Vec<usize> = self
+            .comments(a)?
+            .iter()
+            .filter(|c| c.page == page && c.subtype == "Ink" && !c.locked)
+            .filter(|c| {
+                let r = c.rect.map(f64::from);
+                r[0] <= b[2] + radius && r[2] >= b[0] - radius && r[1] <= b[3] + radius && r[3] >= b[1] - radius
+            })
+            .map(|c| c.index)
+            .collect();
+        if hits.is_empty() {
+            return Ok(json!({ "drawings": 0 }));
+        }
+        hits.sort_unstable_by(|x, y| y.cmp(x));
+        let n = hits.len();
+        let edits = hits.into_iter().map(|index| Edit::EraseInk { page, index, path: path.clone(), radius }).collect();
+        let mut out = self.apply(a, Edit::Batch { label: "Erase".into(), edits })?;
+        if let Some(o) = out.as_object_mut() {
+            o.insert("drawings".into(), json!(n));
+        }
+        Ok(out)
     }
 }
 
