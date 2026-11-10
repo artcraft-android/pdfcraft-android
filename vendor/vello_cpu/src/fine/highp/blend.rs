@@ -262,25 +262,25 @@ fn sat<S: Simd>(r: f32x4<S>, g: f32x4<S>, b: f32x4<S>) -> f32x4<S> {
     r.max(g).max(b) - r.min(g).min(b)
 }
 
+// PdfCraft patch: backport of linebender/vello#2000. A gray that rounding leaves just below 0
+// or above 1 has `l == n` (or `x == l`), and the unguarded division made a NaN that drew it
+// black, whatever the backdrop's alpha; a clip now needs a nonzero denominator.
 fn clip_color<S: Simd>(r: &mut f32x4<S>, g: &mut f32x4<S>, b: &mut f32x4<S>) {
     let simd = r.simd;
+    let zero = f32x4::splat(simd, 0.0);
 
     let l = lum(*r, *g, *b);
     let n = r.min(g.min(*b));
     let x = r.max(g.max(*b));
+    let below = l - n;
+    let above = x - l;
+    let clip_low = simd.simd_lt_f32x4(n, zero) & simd.simd_gt_f32x4(below, zero);
+    let clip_high =
+        simd.simd_gt_f32x4(x, f32x4::splat(simd, 1.0)) & simd.simd_gt_f32x4(above, zero);
 
     for c in [r, g, b] {
-        *c = simd.select_f32x4(
-            simd.simd_lt_f32x4(n, f32x4::splat(simd, 0.0)),
-            l + (((*c - l) * l) / (l - n)),
-            *c,
-        );
-
-        *c = simd.select_f32x4(
-            simd.simd_gt_f32x4(x, f32x4::splat(simd, 1.0)),
-            l + (((*c - l) * (1.0 - l)) / (x - l)),
-            *c,
-        );
+        *c = simd.select_f32x4(clip_low, l + (((*c - l) * l) / below), *c);
+        *c = simd.select_f32x4(clip_high, l + (((*c - l) * (1.0 - l)) / above), *c);
     }
 }
 

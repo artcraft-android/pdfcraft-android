@@ -915,6 +915,9 @@ struct Laid {
     general: Option<f64>,
 }
 
+// Lays a sheet out page by page in one pass (used range, column widths, print scaling, cells,
+// merges, borders, pictures), as Excel prints it.
+#[allow(clippy::cognitive_complexity)]
 fn draw_sheet(sheet: &Sheet, styles: &StyleSheet, images: &[SheetImage], date1904: bool, writer: &mut Writer) -> Result<(), String> {
     // The used range: cells with a value, and merged areas.
     let mut range: Option<(u32, u32, u32, u32)> = None;

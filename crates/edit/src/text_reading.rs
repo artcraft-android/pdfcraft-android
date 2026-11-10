@@ -7,7 +7,9 @@
 //! split only at wide gaps, whatever font, subset or colour drew them. Each line takes the style
 //! most of its characters are set in. Other text (rotated or skewed) keeps the run-based lines.
 
-use super::*;
+use super::interp::Shown;
+use super::lines::{FormCall, add_shown, fill_color};
+use super::{Dict, Document, Object, Op, Stream, TextLine, content_streams, parse, serialize_ops};
 
 /// The most glyphs one page is rebuilt from; runs past it keep their run-based lines.
 const MAX_PAGE_GLYPHS: usize = 1_000_000;
@@ -142,19 +144,31 @@ fn glyph_lines(runs: &[Run], mut glyphs: Vec<Glyph>) -> Vec<(usize, TextLine)> {
     for mut row in rows {
         row.sort_by(|a, b| a.x0.total_cmp(&b.x0));
         let row = dedupe(runs, row);
+        // Face (without its subset tag), size, bold and italic: a word set in another of these (an
+        // italic case name, a bold lead-in) is a block of its own, which the exporters keep as a
+        // run of its sentence (#4158). Subsets of one face are one style, as a browser prints them.
+        let style = |i: usize| {
+            runs.get(i).map(|r| (face_name(&r.shown.base_font).to_owned(), (r.shown.size * 100.0).round() as i64, r.shown.bold, r.shown.italic))
+        };
         let mut segment: Vec<Glyph> = Vec::new();
         for g in row {
+            let mut restyled = false;
             let split = segment.iter().rev().find(|p| !p.text.trim().is_empty()).or(segment.last()).is_some_and(|p| {
                 let (small, big) = (p.size.min(g.size), p.size.max(g.size));
                 let scope = |i: usize| runs.get(i).and_then(|r| r.shown.scope);
-                g.x0 - p.x1 > 1.5 * big || big > 1.6 * small || scope(p.run) != scope(g.run)
+                // At a word boundary only: a space before it, or a gap a space would leave.
+                let boundary = segment.last().is_some_and(|l| l.text.trim().is_empty()) || g.x0 - p.x1 > 0.15 * small;
+                restyled = !g.text.trim().is_empty() && boundary && style(p.run) != style(g.run);
+                g.x0 - p.x1 > 1.5 * big || big > 1.6 * small || scope(p.run) != scope(g.run) || restyled
             });
             if split {
-                out.extend(segment_line(runs, std::mem::take(&mut segment)));
+                // A word in another style keeps the space before it, so the exporters set the
+                // two runs a word apart.
+                out.extend(segment_line(runs, std::mem::take(&mut segment), restyled));
             }
             segment.push(g);
         }
-        out.extend(segment_line(runs, segment));
+        out.extend(segment_line(runs, segment, false));
     }
     out
 }
@@ -184,8 +198,9 @@ fn dedupe(runs: &[Run], row: Vec<Glyph>) -> Vec<Glyph> {
     out
 }
 
-/// One line from a left-to-right run of glyphs on one baseline.
-fn segment_line(runs: &[Run], glyphs: Vec<Glyph>) -> Option<(usize, TextLine)> {
+/// One line from a left-to-right run of glyphs on one baseline. With `space_after`, a space the
+/// glyphs end with stays at the end of its text (a run of another style follows on the line).
+fn segment_line(runs: &[Run], glyphs: Vec<Glyph>, space_after: bool) -> Option<(usize, TextLine)> {
     let first = glyphs.first()?;
     // Gaps between letters: letter-spaced text has wide ones everywhere, so a word break is a
     // gap clearly wider than the usual one.
@@ -212,9 +227,12 @@ fn segment_line(runs: &[Run], glyphs: Vec<Glyph>) -> Option<(usize, TextLine)> {
         text.push_str(&g.text);
         prev = Some(g);
     }
-    let text = crate::bidi::to_logical(text.trim());
+    let mut text = crate::bidi::to_logical(text.trim());
     if text.is_empty() {
         return None;
+    }
+    if space_after && pending_space {
+        text.push(' ');
     }
     // The style most of the characters are set in.
     let mut weight: Vec<(usize, usize)> = Vec::new();
@@ -389,13 +407,14 @@ fn collect_stops(doc: &Document, f: &Object, out: &mut Vec<Vec<f64>>, depth: usi
 }
 
 /// Where a form paints a gradient, from the patterns it fills with and the shadings it draws.
-pub(super) fn form_paint(doc: &Document, form: &FormCall, ops: &[Op]) -> Option<Gradient> {
-    let shadings = form.resources.get(b"Shading").and_then(|s| doc.dict(s));
+pub(super) fn form_paint(doc: &Document, form: &FormCall, drawn_with: &Dict, ops: &[Op]) -> Option<Gradient> {
+    let resources = form.resources(drawn_with);
+    let shadings = resources.get(b"Shading").and_then(|s| doc.dict(s));
     let mut colors = Vec::new();
     for (i, op) in ops.iter().enumerate().take(100_000) {
         if op.is("scn") {
             let fill: Vec<Op> = ops.get(i.saturating_sub(1)..=i).map(|s| s.to_vec()).unwrap_or_default();
-            if let Some(c) = pattern_color(doc, &form.resources, &fill) {
+            if let Some(c) = pattern_color(doc, resources, &fill) {
                 colors.push(c);
             }
         } else if op.is("sh")

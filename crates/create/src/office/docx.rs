@@ -1280,6 +1280,8 @@ impl Converter<'_, '_, '_> {
         }
     }
 
+    // One pass over a table's properties, grid, rows and cells, kept together as Word nests them.
+    #[allow(clippy::cognitive_complexity)]
     fn table(&mut self, tbl: Node<'_, '_>, depth: usize) -> Option<Table> {
         let pr = child(tbl, "tblPr");
         let style_id = pr.and_then(|p| child(p, "tblStyle")).and_then(|s| attr(s, "val")).map(str::to_string);

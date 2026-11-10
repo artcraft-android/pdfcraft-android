@@ -410,11 +410,15 @@ pub fn xlsx(pages: &[Page], title: &str) -> Vec<u8> {
                 break;
             }
             match it {
-                Item::Para(b, _) => {
+                Item::Para(runs, _) => {
+                    // A paragraph's runs (a link, an italic word) share its one cell, in its
+                    // first run's style.
+                    let Some(b) = runs.first().map(|r| r.block) else { continue };
+                    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
                     if last == Some(true) {
                         sheet.skip_row();
                     }
-                    sheet.put_row(&[(0, &b.text, Font::new(b.size, b.bold, b.italic, b.color), 1)], &mut styles, &mut strings);
+                    sheet.put_row(&[(0, &text, Font::new(b.size, b.bold, b.italic, b.color), 1)], &mut styles, &mut strings);
                     last = Some(false);
                 }
                 Item::Table(t) => {

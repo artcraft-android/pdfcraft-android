@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use hayro_interpret::font::StandardFont;
 use pdfcraft_cos::{Dict, Document, ObjRef, Object};
 
-use crate::{CreateError, add_page};
+use crate::{CreateError, Pages};
 
 /// Most pages one converted file may produce.
 pub(crate) const MAX_PAGES: usize = 5_000;
@@ -412,11 +412,15 @@ pub(crate) struct Writer {
     /// Embedded images: (cache key, the object and natural size, or `None` when it couldn't be read).
     images: Vec<(String, Option<Embedded>)>,
     pages: usize,
+    /// The page tree the pages go into, written once when the document is finished.
+    tree: Option<Pages>,
 }
 
 impl Writer {
     pub(crate) fn new() -> Self {
-        Self { doc: Document::new_empty(), fonts: [None; 12], images: Vec::new(), pages: 0 }
+        let doc = Document::new_empty();
+        let tree = Pages::of(&doc).ok();
+        Self { doc, fonts: [None; 12], images: Vec::new(), pages: 0, tree }
     }
 
     /// Embed the image `bytes` (PNG, JPEG, GIF, BMP, TIFF, JPEG 2000), once per `key`. Returns
@@ -592,7 +596,7 @@ impl Writer {
         if !xo.is_empty() {
             res.set(b"XObject".to_vec(), Object::Dict(xo));
         }
-        add_page(&mut self.doc, w, h, res, Some(c))?;
+        self.tree.as_mut().ok_or_else(|| CreateError::Invalid("the new document has no page tree".into()))?.add(&mut self.doc, w, h, res, Some(c));
         self.pages += 1;
         Ok(())
     }
@@ -601,6 +605,9 @@ impl Writer {
         if self.pages == 0 {
             // An empty document still converts: one blank page, as an empty file prints.
             self.page(crate::LETTER.0, crate::LETTER.1, &[])?;
+        }
+        if let Some(tree) = self.tree.take() {
+            tree.finish(&mut self.doc)?;
         }
         crate::set_title(&mut self.doc, title);
         Ok(self.doc)
