@@ -1984,7 +1984,10 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
     private fun scriptOutput(doc: OpenDocument, r: JSONObject) {
         // a script that failed: kept out of sight, as the reference keeps it, but in the log
         r.optString("error").takeIf { it.isNotEmpty() && it != "null" }?.let { android.util.Log.w("PdfCraft", "form script: $it") }
-        r.optJSONArray("alerts")?.let { a -> for (i in 0 until a.length()) showScriptAlert(a.optString(i)) }
+        // js_run gives each alert as an object (message, title, icon, buttons); edits give the text
+        r.optJSONArray("alerts")?.let { a ->
+            for (i in 0 until a.length()) showScriptAlert(a.optJSONObject(i)?.optString("message") ?: a.optString(i))
+        }
         val requests = r.optJSONArray("requests") ?: return
         for (i in 0 until requests.length()) {
             val q = requests.optJSONObject(i) ?: continue
