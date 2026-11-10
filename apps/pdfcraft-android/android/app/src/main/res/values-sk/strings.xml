@@ -477,6 +477,8 @@
     <string name="props_keywords">Kľúčové slová</string>
     <string name="props_creator">Aplikácia</string>
     <string name="props_producer">Tvorca PDF</string>
+    <string name="props_pdf_created">PDF vytvorené</string>
+    <string name="props_pdf_modified">PDF upravené</string>
     <string name="props_version">Verzia PDF</string>
     <string name="props_pages">Strany</string>
     <string name="props_page_size">Veľkosť strany</string>

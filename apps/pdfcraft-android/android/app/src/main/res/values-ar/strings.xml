@@ -492,6 +492,8 @@
     <string name="props_keywords">الكلمات الرئيسية</string>
     <string name="props_creator">التطبيق</string>
     <string name="props_producer">منتج PDF</string>
+    <string name="props_pdf_created">تاريخ إنشاء PDF</string>
+    <string name="props_pdf_modified">تاريخ تعديل PDF</string>
     <string name="props_version">إصدار PDF</string>
     <string name="props_pages">الصفحات</string>
     <string name="props_page_size">حجم الصفحة</string>

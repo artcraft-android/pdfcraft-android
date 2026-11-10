@@ -76,6 +76,9 @@ pub struct DocumentInfo {
     pub keywords: Option<String>,
     pub creator: Option<String>,
     pub producer: Option<String>,
+    /// The document's own dates (`/CreationDate`, `/ModDate`), as written (`D:20261011171900Z`).
+    pub created: Option<String>,
+    pub modified: Option<String>,
     pub pdf_version: String,
     pub file_size: u64,
     pub encrypted: bool,
@@ -893,6 +896,8 @@ fn document_info(d: &Document) -> DocumentInfo {
         keywords: info.keywords.clone(),
         creator: info.creator.clone(),
         producer: info.producer.clone(),
+        created: info.created.clone(),
+        modified: info.modified.clone(),
         pdf_version: info.pdf_version.clone(),
         file_size: info.file_size as u64,
         encrypted: info.encrypted,

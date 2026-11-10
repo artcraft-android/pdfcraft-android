@@ -700,6 +700,8 @@
     <string name="props_keywords">Keywords</string>
     <string name="props_creator">Application</string>
     <string name="props_producer">PDF producer</string>
+    <string name="props_pdf_created">PDF created</string>
+    <string name="props_pdf_modified">PDF modified</string>
     <string name="props_version">PDF version</string>
     <string name="props_pages">Pages</string>
     <string name="props_page_size">Page size</string>

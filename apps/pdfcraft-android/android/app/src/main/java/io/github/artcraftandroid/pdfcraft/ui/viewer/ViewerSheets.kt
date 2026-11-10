@@ -196,6 +196,9 @@ fun PropertiesSheet(vm: AppViewModel, doc: OpenDocument) {
                 section(R.string.props_section_advanced)
                 prop(R.string.props_creator, info.creator)
                 prop(R.string.props_producer, info.producer)
+                // the PDF's own dates, apart from the file's Modified above
+                prop(R.string.props_pdf_created, pdfDateLabel(info.created))
+                prop(R.string.props_pdf_modified, pdfDateLabel(info.modified))
                 prop(R.string.props_version, info.pdfVersion)
                 prop(R.string.props_pages, info.pages.size.toString())
                 info.pages.getOrNull(doc.viewer.currentPage)?.let { p ->

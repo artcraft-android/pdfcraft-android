@@ -640,6 +640,8 @@
     <string name="props_keywords">Mots-clés</string>
     <string name="props_creator">Application</string>
     <string name="props_producer">Producteur PDF</string>
+    <string name="props_pdf_created">PDF créé</string>
+    <string name="props_pdf_modified">PDF modifié</string>
     <string name="props_version">Version PDF</string>
     <string name="props_pages">Pages</string>
     <string name="props_page_size">Taille de page</string>

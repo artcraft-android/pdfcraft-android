@@ -690,6 +690,8 @@
     <string name="props_keywords">Stichwörter</string>
     <string name="props_creator">Anwendung</string>
     <string name="props_producer">PDF-Erzeuger</string>
+    <string name="props_pdf_created">PDF erstellt</string>
+    <string name="props_pdf_modified">PDF geändert</string>
     <string name="props_version">PDF-Version</string>
     <string name="props_pages">Seiten</string>
     <string name="props_page_size">Seitengröße</string>

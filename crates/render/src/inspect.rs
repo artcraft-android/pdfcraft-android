@@ -53,6 +53,10 @@ pub struct DocInfo {
     pub keywords: Option<String>,
     pub creator: Option<String>,
     pub producer: Option<String>,
+    /// When the document says it was made and last changed (`/CreationDate`, `/ModDate`), as
+    /// written (`D:20261011171900Z`); not checked against the file's own dates.
+    pub created: Option<String>,
+    pub modified: Option<String>,
     /// Custom document properties: `/Info` entries with a key the spec does not name and a text
     /// value, as (name, text), in the dictionary's order (at most 256).
     pub custom: Vec<(String, String)>,

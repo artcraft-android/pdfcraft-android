@@ -505,6 +505,29 @@ fn page_label_prefix_spaces_survive_public_inspection() {
 }
 
 #[test]
+fn the_documents_own_dates_are_read_as_written() {
+    use lopdf::dictionary;
+    let mut doc = Document::with_version("1.7");
+    let pages_id = doc.new_object_id();
+    let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages_id, "MediaBox" => vec![0.into(), 0.into(), 200.into(), 300.into()] });
+    doc.objects.insert(pages_id, dictionary! { "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1 }.into());
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    let info_id = doc.add_object(dictionary! {
+        "CreationDate" => Object::string_literal("D:20261011171900Z"),
+        "ModDate" => Object::string_literal("D:20261103090000+02'00'"),
+    });
+    doc.trailer.set("Root", catalog_id);
+    doc.trailer.set("Info", info_id);
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).expect("write the dated fixture");
+    let info = inspect(Arc::new(bytes), None).expect("inspect the dated fixture");
+    assert_eq!(info.created.as_deref(), Some("D:20261011171900Z"));
+    assert_eq!(info.modified.as_deref(), Some("D:20261103090000+02'00'"));
+    // still not custom properties
+    assert!(info.custom.is_empty(), "{:?}", info.custom);
+}
+
+#[test]
 fn page_label_limits_keep_normal_pdf_numbering() {
     for (style, first, expected) in
         [("r", 4, ["iv", "v", "vi"]), ("R", 1994, ["MCMXCIV", "MCMXCV", "MCMXCVI"]), ("a", 26, ["z", "aa", "bb"]), ("A", 52, ["ZZ", "AAA", "BBB"])]
