@@ -101,7 +101,12 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
     }
 
     init {
-        viewModelScope.launch {
+        // Dispatched, not immediate: this starts once the constructor has finished. When the
+        // process is still alive (a file opened from another app after Back closed the last one),
+        // the engine is already loaded, so an immediate start ran on into fields declared further
+        // down (trustedCerts) before they existed, and the app crashed on that first open (#58,
+        // #34, #41).
+        viewModelScope.launch(Dispatchers.Main) {
             application.engine.await().onSuccess { engine = it }.onFailure { engineProblem = it.userMessage }
             refreshRecents()
             // the signers the reader trusts, before any signature is checked
