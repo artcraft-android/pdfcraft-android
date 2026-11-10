@@ -3,6 +3,7 @@ package io.github.artcraftandroid.pdfcraft.ui
 import android.app.ActivityManager
 import io.github.artcraftandroid.pdfcraft.ui.home.FileTool
 import io.github.artcraftandroid.pdfcraft.ui.viewer.FillElement
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import io.github.artcraftandroid.pdfcraft.engine.toBitmap
 import io.github.artcraftandroid.pdfcraft.engine.UserBookmark
@@ -2379,6 +2380,46 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
         scanName = ""
         insertScanAt = null
         toolScreen = null
+    }
+
+    /** Scan previews made lately, by photo, corners and look: switching back and forth is instant. */
+    private val scanPreviews = object : LinkedHashMap<String, androidx.compose.ui.graphics.ImageBitmap>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, androidx.compose.ui.graphics.ImageBitmap>?) = size > 8
+    }
+
+    /**
+     * [page] as Save PDF will make it with [filter]: the part inside its corners, straightened,
+     * with the look (#48). The same engine step as saving, run on the smaller photo the screen
+     * already shows, so the preview is the result. Null when it can't be made.
+     */
+    suspend fun scanPreview(page: ScanPage, filter: ScanFilter): androidx.compose.ui.graphics.ImageBitmap? {
+        if (filter == ScanFilter.Original && page.corners.contentEquals(ScanPage.WHOLE)) return page.thumb
+        val key = "${page.file.path}|${page.corners.contentToString()}|$filter"
+        scanPreviews[key]?.let { return it }
+        val eng = engine ?: return null
+        val src = tempFile("jpg")
+        return try {
+            withContext(Dispatchers.IO) {
+                src.outputStream().use { page.thumb.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, it) }
+            }
+            val id = eng.tool("doc_create", mapOf("from" to "images", "paths" to listOf(src.absolutePath), "name" to "Preview")).optLong("doc")
+            try {
+                val size = eng.tool("doc_info", mapOf("doc" to id)).optJSONArray("pages")?.optJSONObject(0) ?: return null
+                val (w, h) = size.optDouble("width") to size.optDouble("height")
+                val corners = page.corners.mapIndexed { k, v -> v * if (k % 2 == 0) w else h }
+                eng.tool("page_enhance_camera", mapOf("doc" to id, "page" to 1, "corners" to corners, "mode" to filter.mode, "level" to filter.level))
+                val out = eng.tool("doc_info", mapOf("doc" to id)).optJSONArray("pages")?.optJSONObject(0)
+                val longest = maxOf(out?.optDouble("width") ?: w, out?.optDouble("height") ?: h).coerceAtLeast(1.0)
+                val img = withContext(eng.commands) { eng.session.renderPage(id.toULong(), 0u, (1400.0 / longest).toFloat(), null) }
+                img.toBitmap().asImageBitmap().also { scanPreviews[key] = it }
+            } finally {
+                runCatching { eng.tool("doc_close", mapOf("doc" to id, "discard_changes" to true)) }
+            }
+        } catch (e: Exception) {
+            null
+        } finally {
+            withContext(Dispatchers.IO) { src.delete() }
+        }
     }
 
     /** Save the scanned pages as a PDF with [filter]'s look (or insert them where Organize asked). */

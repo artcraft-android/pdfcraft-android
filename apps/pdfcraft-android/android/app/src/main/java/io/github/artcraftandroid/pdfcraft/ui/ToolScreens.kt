@@ -719,7 +719,29 @@ fun ScanScreen(vm: AppViewModel) {
         Box(Modifier.weight(1f).fillMaxWidth().background(c.desk), contentAlignment = Alignment.Center) {
             val page = pages.getOrNull(current.coerceAtMost(pages.lastIndex))
             if (page != null) {
-                ScanPhoto(page.thumb, page.corners, Modifier.fillMaxSize())
+                // the page as it will be saved, with the chosen look (#48); the photo and its
+                // crop until the first preview is ready, then the last one while the next is made
+                var preview by remember(page.file) { mutableStateOf<ImageBitmap?>(null) }
+                var making by remember { mutableStateOf(false) }
+                LaunchedEffect(page.file, page.corners, filter) {
+                    making = true
+                    try {
+                        vm.scanPreview(page, filter)?.let { preview = it }
+                    } finally {
+                        making = false
+                    }
+                }
+                val shown = preview
+                if (shown != null) {
+                    Image(shown, stringResource(R.string.tools_page_number, current + 1), Modifier.fillMaxSize().padding(16.dp), contentScale = ContentScale.Fit)
+                } else {
+                    ScanPhoto(page.thumb, page.corners, Modifier.fillMaxSize())
+                }
+                if (making) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        Modifier.align(Alignment.TopEnd).padding(12.dp).size(20.dp), color = c.accent, strokeWidth = 2.dp,
+                    )
+                }
             } else {
                 Text(stringResource(R.string.tools_scan_empty), color = c.textSecondary)
             }
