@@ -234,6 +234,8 @@
     <string name="home_search_count_body">Find in a document shows which result you\'re on and how many there are, such as 3 of 12.</string>
     <string name="home_two_pages_on_phones">Two-page views on phones</string>
     <string name="home_two_pages_on_phones_body">View settings also offers Two pages and Two pages with cover page on a phone, handy in landscape. Tablets always have them.</string>
+    <string name="home_properties_in_menu">Document properties in the menu</string>
+    <string name="home_properties_in_menu_body">The ⋮ menu in a document gets Document properties: the file\'s name, size and place, its title, author and other details, the PDF version, page size and security.</string>
     <string name="home_scan_folder">Folder for scans</string>
     <!-- %1$s: a folder's name, or home_scan_folder_downloads -->
     <string name="home_scan_folder_body">New scans are saved in %1$s.</string>
@@ -680,6 +682,38 @@
     <string name="sheet_single_page">Single page</string>
     <string name="sheet_two_pages">Two pages</string>
     <string name="sheet_two_pages_cover">Two pages with cover page</string>
+    <string name="sheet_properties">Document properties</string>
+    <string name="props_section_file">File</string>
+    <string name="props_section_description">Description</string>
+    <string name="props_section_advanced">Advanced</string>
+    <string name="props_section_security">Security</string>
+    <string name="props_section_custom">Custom</string>
+    <string name="props_name">Name</string>
+    <string name="props_size">Size</string>
+    <string name="props_location">Location</string>
+    <string name="props_modified">Modified</string>
+    <string name="props_title">Title</string>
+    <string name="props_author">Author</string>
+    <string name="props_subject">Subject</string>
+    <string name="props_keywords">Keywords</string>
+    <string name="props_creator">Application</string>
+    <string name="props_producer">PDF producer</string>
+    <string name="props_version">PDF version</string>
+    <string name="props_pages">Pages</string>
+    <string name="props_page_size">Page size</string>
+    <!-- %1$s: a page size, such as 210 × 297 mm -->
+    <string name="props_page_size_mixed">%1$s (pages differ in size)</string>
+    <string name="props_tagged">Tagged PDF</string>
+    <string name="props_password">Password protected</string>
+    <string name="props_printing">Printing</string>
+    <string name="props_copying">Copying text and images</string>
+    <string name="props_commenting">Commenting</string>
+    <string name="props_form_filling">Filling in forms</string>
+    <string name="props_assembly">Organizing pages</string>
+    <string name="props_yes">Yes</string>
+    <string name="props_no">No</string>
+    <string name="props_allowed">Allowed</string>
+    <string name="props_not_allowed">Not allowed</string>
     <string name="sheet_reading_mode">Reading Mode</string>
     <string name="sheet_night_mode">Night Mode</string>
 

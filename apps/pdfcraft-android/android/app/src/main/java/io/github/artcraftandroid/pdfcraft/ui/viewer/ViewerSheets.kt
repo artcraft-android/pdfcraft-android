@@ -112,6 +112,8 @@ fun MoreSheet(vm: AppViewModel, doc: OpenDocument) {
         }
         SheetDivider()
         Column(Modifier.verticalScroll(scroll).padding(top = 5.dp)) {
+            // not in the reference: Extra Features adds it (#55)
+            if (vm.propertiesInMenu) SheetRow(LucideIcons.Info, stringResource(R.string.sheet_properties), { ctl.sheet = ViewerSheet.Properties }, chevron = true)
             SheetRow(LucideIcons.Glasses, stringResource(R.string.sheet_view_settings), { ctl.sheet = ViewerSheet.ViewSettings }, chevron = true)
             SheetRow(LucideIcons.LayoutGrid, stringResource(R.string.sheet_pages), { close(); ctl.pagesOpen = true }, chevron = true)
             if (doc.info.attachments > 0u) SheetRow(LucideIcons.Paperclip, stringResource(R.string.sheet_attachments), { ctl.sheet = ViewerSheet.Attachments }, chevron = true)
@@ -142,6 +144,92 @@ fun MoreSheet(vm: AppViewModel, doc: OpenDocument) {
         }
     }
 }
+
+/**
+ * Document properties (Extra Features, #55): the file, its description, the PDF's details, its
+ * security, and any custom properties. The values can be selected and copied.
+ */
+@Composable
+fun PropertiesSheet(vm: AppViewModel, doc: OpenDocument) {
+    val c = pdfColors
+    val ctl = doc.controller
+    val info = doc.info
+    var facts by remember { mutableStateOf<AppViewModel.FileFacts?>(null) }
+    LaunchedEffect(info.generation) { facts = vm.fileFacts(doc) }
+    val yes = stringResource(R.string.props_yes)
+    val no = stringResource(R.string.props_no)
+    val allowed = stringResource(R.string.props_allowed)
+    val notAllowed = stringResource(R.string.props_not_allowed)
+
+    @Composable
+    fun section(title: Int) {
+        Text(stringResource(title), color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 2.dp))
+    }
+
+    @Composable
+    fun prop(label: String, value: String) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp)) {
+            Text(label, color = c.textSecondary, fontSize = 13.sp)
+            Text(value, color = c.text, fontSize = 15.sp)
+        }
+    }
+
+    @Composable
+    fun prop(label: Int, value: String?) {
+        if (!value.isNullOrBlank()) prop(stringResource(label), value)
+    }
+
+    PdfSheet(onDismiss = { ctl.sheet = ViewerSheet.None }, maxHeightFraction = 0.85f, fill = true) {
+        SheetBackHeader(stringResource(R.string.sheet_properties), onBack = { ctl.sheet = ViewerSheet.More })
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+                section(R.string.props_section_file)
+                prop(R.string.props_name, info.name)
+                prop(R.string.props_size, formatSize(info.fileSize.toLong()))
+                prop(R.string.props_location, facts?.location)
+                prop(R.string.props_modified, facts?.modified?.let { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(it)) })
+                val description = listOf(R.string.props_title to info.title, R.string.props_author to info.author, R.string.props_subject to info.subject, R.string.props_keywords to info.keywords)
+                if (description.any { !it.second.isNullOrBlank() }) {
+                    section(R.string.props_section_description)
+                    description.forEach { (label, value) -> prop(label, value) }
+                }
+                section(R.string.props_section_advanced)
+                prop(R.string.props_creator, info.creator)
+                prop(R.string.props_producer, info.producer)
+                prop(R.string.props_version, info.pdfVersion)
+                prop(R.string.props_pages, info.pages.size.toString())
+                info.pages.getOrNull(doc.viewer.currentPage)?.let { p ->
+                    val size = pageSizeText(p.width, p.height)
+                    val mixed = info.pages.any { kotlin.math.abs(it.width - p.width) > 1f || kotlin.math.abs(it.height - p.height) > 1f }
+                    prop(R.string.props_page_size, if (mixed) stringResource(R.string.props_page_size_mixed, size) else size)
+                }
+                prop(R.string.props_tagged, if (info.tagged) yes else no)
+                section(R.string.props_section_security)
+                prop(R.string.props_password, if (info.encrypted) yes else no)
+                prop(R.string.props_printing, if (info.allowsPrinting) allowed else notAllowed)
+                prop(R.string.props_copying, if (info.allowsCopying) allowed else notAllowed)
+                prop(R.string.props_commenting, if (info.allowsAnnotation) allowed else notAllowed)
+                prop(R.string.props_form_filling, if (info.allowsFormFilling) allowed else notAllowed)
+                prop(R.string.props_assembly, if (info.allowsAssembly) allowed else notAllowed)
+                val custom = facts?.custom.orEmpty()
+                if (custom.isNotEmpty()) {
+                    section(R.string.props_section_custom)
+                    custom.forEach { (name, value) -> prop(name, value) }
+                }
+            }
+        }
+    }
+}
+
+/** A page's size ([w] × [h] points): in inches where the country uses them, else millimetres. */
+internal fun pageSizeText(w: Float, h: Float, country: String = java.util.Locale.getDefault().country): String {
+    val nf = java.text.NumberFormat.getNumberInstance().apply { maximumFractionDigits = if (country in INCH_COUNTRIES) 2 else 0 }
+    return if (country in INCH_COUNTRIES) "${nf.format(w / 72f)} × ${nf.format(h / 72f)} in"
+    else "${nf.format(w / 72f * 25.4f)} × ${nf.format(h / 72f * 25.4f)} mm"
+}
+
+/** The countries whose paper is measured in inches. */
+private val INCH_COUNTRIES = setOf("US", "LR", "MM")
 
 /** When the file was modified: the time today, [yesterday] ("Yesterday"), else the date. */
 internal fun modifiedLabel(t: Long, yesterday: String, now: Long = System.currentTimeMillis()): String {

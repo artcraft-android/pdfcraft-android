@@ -6,6 +6,7 @@ import io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode
 import io.github.artcraftandroid.pdfcraft.ui.viewer.PageSize
 import io.github.artcraftandroid.pdfcraft.ui.viewer.Spread
 import io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerState
+import io.github.artcraftandroid.pdfcraft.ui.viewer.pageSizeText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -283,5 +284,17 @@ class ViewerGeometryTest {
         assertEquals(6, s.currentPage)
         s.switchMode(PageMode.SinglePage, Spread.TwoPages)
         assertEquals(Spread.None, s.spread)
+    }
+
+    @Test
+    fun pageSizesInMillimetresOrInches() {
+        val before = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(java.util.Locale.US)
+        try {
+            assertEquals("210 × 297 mm", pageSizeText(595.28f, 841.89f, country = "DE"))
+            assertEquals("8.5 × 11 in", pageSizeText(612f, 792f, country = "US"))
+        } finally {
+            java.util.Locale.setDefault(before)
+        }
     }
 }

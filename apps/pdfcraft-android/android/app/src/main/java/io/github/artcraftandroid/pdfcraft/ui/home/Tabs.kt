@@ -402,6 +402,11 @@ private fun Preferences(vm: AppViewModel) {
     }
     Text(stringResource(R.string.home_two_pages_on_phones_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
     Spacer(Modifier.height(8.dp))
+    SheetRow(null, stringResource(R.string.home_properties_in_menu), { vm.updatePropertiesInMenu(!vm.propertiesInMenu) }) {
+        PdfSwitch(vm.propertiesInMenu, { vm.updatePropertiesInMenu(it) })
+    }
+    Text(stringResource(R.string.home_properties_in_menu_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
+    Spacer(Modifier.height(8.dp))
     SheetRow(null, stringResource(R.string.home_scan_folder), { vm.chooseScanFolder() }, chevron = true)
     Text(
         stringResource(R.string.home_scan_folder_body, vm.scanFolderName ?: stringResource(R.string.home_scan_folder_downloads)),

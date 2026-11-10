@@ -845,6 +845,30 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
     val twoPagesOffered: Boolean
         get() = twoPagesOnPhones || getApplication<Application>().resources.configuration.smallestScreenWidthDp >= 600
 
+    /** Document properties is in the viewer's menu (Extra Features, #55). */
+    var propertiesInMenu by mutableStateOf(appPrefs.getBoolean("propertiesInMenu", false))
+        private set
+
+    fun updatePropertiesInMenu(on: Boolean) {
+        propertiesInMenu = on
+        appPrefs.edit().putBoolean("propertiesInMenu", on).apply()
+    }
+
+    /** What Document properties shows beyond the document's own info: where the file is, when it changed, custom properties. */
+    class FileFacts(val location: String?, val modified: Long?, val custom: List<Pair<String, String>>)
+
+    suspend fun fileFacts(doc: OpenDocument): FileFacts {
+        val src = doc.source
+        val (location, modified) = withContext(Dispatchers.IO) {
+            (src?.let { runCatching { files.displayLocation(it) }.getOrNull() }) to (src?.let { files.lastModified(it) } ?: doc.file.lastModified().takeIf { it > 0 })
+        }
+        val custom = runCatching {
+            val arr = engine?.tool("doc_info", mapOf("doc" to doc.id))?.optJSONArray("custom")
+            (0 until (arr?.length() ?: 0)).mapNotNull { i -> arr?.optJSONObject(i)?.let { it.optString("name") to it.optString("value") } }.filter { it.first.isNotBlank() }
+        }.getOrDefault(emptyList())
+        return FileFacts(location, modified, custom)
+    }
+
     var twoPagesOnPhones by mutableStateOf(appPrefs.getBoolean("twoPagesOnPhones", false))
         private set
 
