@@ -226,6 +226,10 @@
     <string name="home_search_count_body">Bei der Dokumentsuche wird angezeigt, welches Ergebnis du gerade ansiehst und wie viele es insgesamt gibt, z. B. 3 von 12.</string>
     <string name="home_two_pages_on_phones">Zweiseitenansichten auf Smartphones</string>
     <string name="home_two_pages_on_phones_body">Die Anzeigeeinstellungen bieten auch auf dem Smartphone „Zwei Seiten“ und „Zwei Seiten mit Deckblatt“, praktisch im Querformat. Tablets haben sie immer.</string>
+    <string name="home_scan_folder">Ordner für Scans</string>
+    <string name="home_scan_folder_body">Neue Scans werden in „%1$s“ gespeichert.</string>
+    <string name="home_scan_folder_downloads">Downloads</string>
+    <string name="home_scan_folder_reset">Scans in „Downloads“ speichern</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">Über</string>
@@ -998,6 +1002,8 @@
     <!-- Messages: saving. %1$s is a file name; %2$s is its size (for example "1.2 MB"). -->
     <string name="msg_saved_copy">Kopie gespeichert</string>
     <string name="msg_saved_downloads">Als %1$s in „Downloads“ gespeichert</string>
+    <string name="msg_saved_in_folder">Als %1$s in „%2$s“ gespeichert</string>
+    <string name="msg_scan_folder_lost">Der Ordner für Scans ist nicht mehr erreichbar, daher wurde %1$s in „Downloads“ gespeichert.</string>
     <string name="msg_saved_downloads_size">Als %1$s in „Downloads“ gespeichert (%2$s)</string>
 
     <!-- Messages: Read aloud -->

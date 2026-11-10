@@ -2395,8 +2395,19 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
             } else {
                 val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH.mm.ss", java.util.Locale.US).format(java.util.Date())
                 val name = DocumentFiles.safeName(chosen.ifEmpty { "Scan $stamp" })
-                val uri = withContext(Dispatchers.IO) { files.saveToDownloads(out, name).also { out.delete() } }
-                tell(text(R.string.msg_saved_downloads, name))
+                // the folder chosen for scans (#60), or Downloads; Downloads too if that folder is gone
+                val folder = scanFolder
+                val folderName = scanFolderName
+                val inFolder = folder?.let { tree -> withContext(Dispatchers.IO) { runCatching { files.saveToFolder(tree, out, name) }.getOrNull() } }
+                val uri = inFolder ?: withContext(Dispatchers.IO) { files.saveToDownloads(out, name) }
+                withContext(Dispatchers.IO) { out.delete() }
+                tell(
+                    when {
+                        inFolder != null -> text(R.string.msg_saved_in_folder, name, folderName ?: "")
+                        folder != null -> text(R.string.msg_scan_folder_lost, name)
+                        else -> text(R.string.msg_saved_downloads, name)
+                    },
+                )
                 open(uri)
             }
         } finally {
@@ -2475,6 +2486,43 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
     }
 
     /** A folder chosen in the picker: list its PDFs from now on. */
+    /** The folder new scans are saved in (Extra Features, #60); null: Downloads. */
+    var scanFolder by mutableStateOf(appPrefs.getString("scanFolder", null)?.let(Uri::parse))
+        private set
+
+    /** [scanFolder]'s name, as its provider gave it when it was chosen. */
+    var scanFolderName by mutableStateOf(appPrefs.getString("scanFolderName", null))
+        private set
+
+    /** Asks the activity for the folder picker, for [scanFolder]. */
+    val scanFolderRequests = Channel<Unit>(Channel.CONFLATED)
+
+    fun chooseScanFolder() {
+        scanFolderRequests.trySend(Unit)
+    }
+
+    /**
+     * The folder picked for scans. PdfCraft keeps lasting access to it, so it's also listed under
+     * On device, where the scans then show.
+     */
+    fun onScanFolderPicked(tree: Uri?) {
+        tree ?: return
+        io.github.artcraftandroid.pdfcraft.engine.LocalFiles.addFolder(getApplication(), tree)
+        val name = io.github.artcraftandroid.pdfcraft.engine.LocalFiles.folderName(getApplication(), tree)
+        scanFolder = tree
+        scanFolderName = name
+        appPrefs.edit().putString("scanFolder", tree.toString()).putString("scanFolderName", name).apply()
+        hasFileAccess = io.github.artcraftandroid.pdfcraft.engine.LocalFiles.hasAccess(getApplication())
+        scanLocal(force = true)
+    }
+
+    /** Scans go to Downloads again (the folder stays under On device). */
+    fun resetScanFolder() {
+        scanFolder = null
+        scanFolderName = null
+        appPrefs.edit().remove("scanFolder").remove("scanFolderName").apply()
+    }
+
     fun addLocalFolder(tree: Uri) {
         io.github.artcraftandroid.pdfcraft.engine.LocalFiles.addFolder(getApplication(), tree)
         hasFileAccess = io.github.artcraftandroid.pdfcraft.engine.LocalFiles.hasAccess(getApplication())

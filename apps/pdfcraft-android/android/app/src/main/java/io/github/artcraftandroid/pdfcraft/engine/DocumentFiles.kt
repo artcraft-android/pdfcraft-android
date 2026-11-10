@@ -220,6 +220,25 @@ class DocumentFiles(private val context: Context) {
         return uri
     }
 
+    /**
+     * Save [file] as [name] in folder [tree], one the app has lasting access to (the folder for
+     * scans, #60); its link. The folder's provider may change the name if it's taken.
+     */
+    fun saveToFolder(tree: Uri, file: File, name: String, mime: String = "application/pdf"): Uri {
+        val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, android.provider.DocumentsContract.getTreeDocumentId(tree))
+        val uri = requireNotNull(android.provider.DocumentsContract.createDocument(resolver, parent, mime, name)) { "no document was made in $tree" }
+        try {
+            resolver.openOutputStream(uri, "w").use { out ->
+                requireNotNull(out) { "$uri can't be written" }
+                file.inputStream().use { it.copyTo(out) }
+            }
+        } catch (e: Exception) {
+            runCatching { android.provider.DocumentsContract.deleteDocument(resolver, uri) }
+            throw e
+        }
+        return uri
+    }
+
     /** Save an image into Pictures/PdfCraft (exported pages). */
     fun saveToPictures(file: File, name: String, mime: String): Uri {
         val values = android.content.ContentValues().apply {

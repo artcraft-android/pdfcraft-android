@@ -169,6 +169,10 @@
     <string name="home_search_count_body">A opção Localizar no documento mostra o resultado atual e o total, como 3 de 12.</string>
     <string name="home_two_pages_on_phones">Visualizações de duas páginas em celulares</string>
     <string name="home_two_pages_on_phones_body">As configurações de visualização também oferecem Duas páginas e Duas páginas com capa no celular, úteis na horizontal. Os tablets sempre as têm.</string>
+    <string name="home_scan_folder">Pasta para digitalizações</string>
+    <string name="home_scan_folder_body">As novas digitalizações são salvas em %1$s.</string>
+    <string name="home_scan_folder_downloads">Downloads</string>
+    <string name="home_scan_folder_reset">Salvar digitalizações em Downloads</string>
     <string name="home_section_about">Sobre</string>
     <string name="home_version">Versão %1$s (mecanismo %2$s)</string>
     <string name="home_version_copied">Versão copiada</string>
@@ -652,6 +656,8 @@
     <string name="msg_print_disabled">Impressão indisponível: a pessoa autora desativou a impressão deste documento.</string>
     <string name="msg_saved_copy">Cópia salva</string>
     <string name="msg_saved_downloads">Salvo como %1$s em Downloads</string>
+    <string name="msg_saved_in_folder">Salvo como %1$s em %2$s</string>
+    <string name="msg_scan_folder_lost">Não é mais possível acessar a pasta para digitalizações, então %1$s foi salvo em Downloads.</string>
     <string name="msg_saved_downloads_size">Salvo como %1$s em Downloads (%2$s)</string>
     <string name="msg_read_aloud_encrypted">A leitura em voz alta não está disponível para documentos protegidos por senha.</string>
     <string name="msg_read_aloud_resumed">A leitura continuou de onde você parou</string>

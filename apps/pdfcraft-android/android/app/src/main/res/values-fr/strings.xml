@@ -226,6 +226,10 @@
     <string name="home_search_count_body">La recherche dans un document indique à quel résultat vous êtes et combien il y en a, par exemple 3 sur 12.</string>
     <string name="home_two_pages_on_phones">Affichage sur deux pages sur les téléphones</string>
     <string name="home_two_pages_on_phones_body">Les réglages d\'affichage proposent aussi Deux pages et Deux pages avec page de couverture sur un téléphone, pratique en mode paysage. Les tablettes les proposent toujours.</string>
+    <string name="home_scan_folder">Dossier des numérisations</string>
+    <string name="home_scan_folder_body">Les nouvelles numérisations sont enregistrées dans %1$s.</string>
+    <string name="home_scan_folder_downloads">Téléchargements</string>
+    <string name="home_scan_folder_reset">Enregistrer les numérisations dans Téléchargements</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">À propos</string>
@@ -903,6 +907,8 @@
     <!-- Messages: saving. %1$s is a file name; %2$s is its size (for example "1.2 MB"). -->
     <string name="msg_saved_copy">Copie enregistrée</string>
     <string name="msg_saved_downloads">Enregistré sous %1$s dans Téléchargements</string>
+    <string name="msg_saved_in_folder">Enregistré sous %1$s dans %2$s</string>
+    <string name="msg_scan_folder_lost">Le dossier des numérisations n\'est plus accessible : %1$s a été enregistré dans Téléchargements.</string>
     <string name="msg_saved_downloads_size">Enregistré sous %1$s dans Téléchargements (%2$s)</string>
 
     <!-- Messages: Read aloud -->

@@ -175,6 +175,10 @@
     <string name="home_search_count_body">Funkcia Nájsť v dokumente zobrazí, na ktorom výsledku ste a koľko ich je, napríklad 3 z 12.</string>
     <string name="home_two_pages_on_phones">Zobrazenia dvoch strán v telefónoch</string>
     <string name="home_two_pages_on_phones_body">Nastavenia zobrazenia ponúkajú aj v telefóne možnosti Dve strany a Dve strany s titulnou stranou, čo sa hodí na šírku. Tablety ich majú vždy.</string>
+    <string name="home_scan_folder">Priečinok na skeny</string>
+    <string name="home_scan_folder_body">Nové skeny sa ukladajú do priečinka %1$s.</string>
+    <string name="home_scan_folder_downloads">Stiahnuté</string>
+    <string name="home_scan_folder_reset">Ukladať skeny do priečinka Stiahnuté</string>
     <string name="home_section_about">O aplikácii</string>
     <string name="home_version">Verzia %1$s, jadro %2$s</string>
     <string name="home_version_copied">Verzia skopírovaná</string>
@@ -668,6 +672,8 @@
     <string name="msg_print_disabled">Tlač nie je dostupná: autor zakázal tlač tohto dokumentu.</string>
     <string name="msg_saved_copy">Uložená kópia</string>
     <string name="msg_saved_downloads">Uložené ako %1$s v priečinku Stiahnuté</string>
+    <string name="msg_saved_in_folder">Uložené ako %1$s v priečinku %2$s</string>
+    <string name="msg_scan_folder_lost">Priečinok na skeny už nie je dostupný, preto sa %1$s uložil do priečinka Stiahnuté.</string>
     <string name="msg_saved_downloads_size">Uložené ako %1$s v priečinku Stiahnuté, %2$s</string>
     <string name="msg_read_aloud_encrypted">Čítanie nahlas nie je dostupné pre dokumenty chránené heslom.</string>
     <string name="msg_read_aloud_resumed">Pokračovanie v čítaní od miesta, kde ste skončili</string>

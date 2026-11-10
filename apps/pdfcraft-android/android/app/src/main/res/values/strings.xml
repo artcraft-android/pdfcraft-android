@@ -234,6 +234,11 @@
     <string name="home_search_count_body">Find in a document shows which result you\'re on and how many there are, such as 3 of 12.</string>
     <string name="home_two_pages_on_phones">Two-page views on phones</string>
     <string name="home_two_pages_on_phones_body">View settings also offers Two pages and Two pages with cover page on a phone, handy in landscape. Tablets always have them.</string>
+    <string name="home_scan_folder">Folder for scans</string>
+    <!-- %1$s: a folder's name, or home_scan_folder_downloads -->
+    <string name="home_scan_folder_body">New scans are saved in %1$s.</string>
+    <string name="home_scan_folder_downloads">Downloads</string>
+    <string name="home_scan_folder_reset">Save scans in Downloads</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">About</string>
@@ -1008,6 +1013,9 @@
     <!-- Messages: saving. %1$s is a file name; %2$s is its size (for example "1.2 MB"). -->
     <string name="msg_saved_copy">Saved a copy</string>
     <string name="msg_saved_downloads">Saved as %1$s in Downloads</string>
+    <!-- %1$s: the file's name; %2$s: the folder's -->
+    <string name="msg_saved_in_folder">Saved as %1$s in %2$s</string>
+    <string name="msg_scan_folder_lost">The folder for scans can\'t be reached any more, so %1$s was saved in Downloads.</string>
     <string name="msg_saved_downloads_size">Saved as %1$s in Downloads (%2$s)</string>
 
     <!-- Messages: Read aloud -->

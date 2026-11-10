@@ -186,6 +186,10 @@
     <string name="home_search_count_body">يعرض البحث في المستند رقم النتيجة الحالية وعدد النتائج كلها، مثل 3 من 12.</string>
     <string name="home_two_pages_on_phones">عرض صفحتين على الهواتف</string>
     <string name="home_two_pages_on_phones_body">تعرض إعدادات العرض أيضًا «صفحتان» و«صفحتان مع صفحة الغلاف» على الهاتف، وهذا مفيد في الوضع الأفقي. وتتوفر دائمًا على الأجهزة اللوحية.</string>
+    <string name="home_scan_folder">مجلد المسح الضوئي</string>
+    <string name="home_scan_folder_body">تُحفظ عمليات المسح الضوئي الجديدة في %1$s.</string>
+    <string name="home_scan_folder_downloads">التنزيلات</string>
+    <string name="home_scan_folder_reset">حفظ عمليات المسح الضوئي في التنزيلات</string>
     <string name="home_section_about">حول التطبيق</string>
     <string name="home_version">الإصدار %1$s (المحرك %2$s)</string>
     <string name="home_version_copied">تم نسخ الإصدار</string>
@@ -689,6 +693,8 @@
     <string name="msg_print_disabled">الطباعة غير متاحة؛ عطّل المؤلف طباعة هذا المستند.</string>
     <string name="msg_saved_copy">تم حفظ نسخة</string>
     <string name="msg_saved_downloads">تم الحفظ باسم %1$s في التنزيلات</string>
+    <string name="msg_saved_in_folder">تم الحفظ باسم %1$s في %2$s</string>
+    <string name="msg_scan_folder_lost">لم يعد الوصول إلى مجلد المسح الضوئي ممكنًا، لذا حُفظ %1$s في التنزيلات.</string>
     <string name="msg_saved_downloads_size">حُفظ باسم %1$s في التنزيلات (%2$s)</string>
     <string name="msg_read_aloud_encrypted">القراءة بصوت عالٍ غير متاحة للمستندات المحمية بكلمة مرور.</string>
     <string name="msg_read_aloud_resumed">متابعة القراءة من حيث توقفت</string>

@@ -233,6 +233,10 @@
     <string name="home_search_count_body">Buscar en un documento muestra en qué resultado estás y cuántos hay, por ejemplo 3 de 12.</string>
     <string name="home_two_pages_on_phones">Vistas de dos páginas en teléfonos</string>
     <string name="home_two_pages_on_phones_body">Ajustes de vista también ofrece Dos páginas y Dos páginas con portada en un teléfono, útil en horizontal. Las tabletas siempre las tienen.</string>
+    <string name="home_scan_folder">Carpeta para escaneos</string>
+    <string name="home_scan_folder_body">Los nuevos escaneos se guardan en %1$s.</string>
+    <string name="home_scan_folder_downloads">Descargas</string>
+    <string name="home_scan_folder_reset">Guardar escaneos en Descargas</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">Acerca de</string>
@@ -1006,6 +1010,8 @@
     <!-- Messages: saving. %1$s is a file name; %2$s is its size (for example "1.2 MB"). -->
     <string name="msg_saved_copy">Copia guardada</string>
     <string name="msg_saved_downloads">Guardado como %1$s en Descargas</string>
+    <string name="msg_saved_in_folder">Guardado como %1$s en %2$s</string>
+    <string name="msg_scan_folder_lost">Ya no se puede acceder a la carpeta para escaneos, así que %1$s se guardó en Descargas.</string>
     <string name="msg_saved_downloads_size">Guardado como %1$s en Descargas (%2$s)</string>
 
     <!-- Messages: Read aloud -->

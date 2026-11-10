@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private val pickSignature = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> vm.importSignatureImage(uri) }
     private val pickPhotos = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris -> vm.onPhotosPicked(uris) }
     private val pickFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(vm::addLocalFolder) }
+    private val pickScanFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> vm.onScanFolderPicked(uri) }
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> vm.onMicPermission(granted) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,6 +106,7 @@ class MainActivity : ComponentActivity() {
         // the folder picker opens at Documents, where PDFs usually are (Download itself can't be chosen)
         val documents = android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Documents")
         lifecycleScope.launch { for (u in vm.accessRequests) launchSafely { pickFolder.launch(documents) } }
+        lifecycleScope.launch { for (u in vm.scanFolderRequests) launchSafely { pickScanFolder.launch(documents) } }
         lifecycleScope.launch {
             for (u in vm.micRequests) {
                 // refused before: explain first (the reference's order); otherwise Android's own prompt

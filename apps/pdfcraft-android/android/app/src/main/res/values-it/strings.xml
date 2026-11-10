@@ -232,6 +232,10 @@
     <string name="home_search_count_body">La ricerca in un documento mostra a quale risultato sei e quanti ce ne sono, ad esempio 3 di 12.</string>
     <string name="home_two_pages_on_phones">Viste a due pagine sui telefoni</string>
     <string name="home_two_pages_on_phones_body">Le impostazioni di visualizzazione offrono anche Due pagine e Due pagine con copertina su un telefono, comode in orizzontale. I tablet le hanno sempre.</string>
+    <string name="home_scan_folder">Cartella per le scansioni</string>
+    <string name="home_scan_folder_body">Le nuove scansioni vengono salvate in %1$s.</string>
+    <string name="home_scan_folder_downloads">Download</string>
+    <string name="home_scan_folder_reset">Salva le scansioni in Download</string>
 
     <!-- Informazioni su PdfCraft -->
 
@@ -993,6 +997,8 @@
 
     <string name="msg_saved_copy">Copia salvata</string>
     <string name="msg_saved_downloads">Salvato come %1$s in Download</string>
+    <string name="msg_saved_in_folder">Salvato come %1$s in %2$s</string>
+    <string name="msg_scan_folder_lost">La cartella per le scansioni non è più raggiungibile, quindi %1$s è stato salvato in Download.</string>
     <string name="msg_saved_downloads_size">Salvato come %1$s in Download (%2$s)</string>
 
     <!-- Lettura ad alta voce -->
