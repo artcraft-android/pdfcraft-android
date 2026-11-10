@@ -230,6 +230,8 @@
     <string name="home_status_bar_in_documents_body">La barra di stato appare insieme alle barre degli strumenti. Quando tocchi per nasconderle, la pagina usa tutto lo schermo, anche intorno alla fotocamera.</string>
     <string name="home_search_count">Mostra il numero dei risultati di ricerca</string>
     <string name="home_search_count_body">La ricerca in un documento mostra a quale risultato sei e quanti ce ne sono, ad esempio 3 di 12.</string>
+    <string name="home_two_pages_on_phones">Viste a due pagine sui telefoni</string>
+    <string name="home_two_pages_on_phones_body">Le impostazioni di visualizzazione offrono anche Due pagine e Due pagine con copertina su un telefono, comode in orizzontale. I tablet le hanno sempre.</string>
 
     <!-- Informazioni su PdfCraft -->
 
@@ -656,6 +658,8 @@
 
     <string name="sheet_continuous">Continua</string>
     <string name="sheet_single_page">Pagina singola</string>
+    <string name="sheet_two_pages">Due pagine</string>
+    <string name="sheet_two_pages_cover">Due pagine con copertina</string>
     <string name="sheet_reading_mode">Modalità lettura</string>
     <string name="sheet_night_mode">Modalità notturna</string>
 

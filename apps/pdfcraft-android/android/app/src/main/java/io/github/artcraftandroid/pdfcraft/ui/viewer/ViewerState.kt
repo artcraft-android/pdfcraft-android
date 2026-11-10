@@ -28,6 +28,10 @@ class ViewerState(pages: List<PageSize>) {
     var pages by mutableStateOf(pages)
     var mode by mutableStateOf(PageMode.Continuous)
 
+    /** Continuous pages one to a row or in pairs (Two pages). */
+    var spread by mutableStateOf(Spread.None)
+        private set
+
     var viewW by mutableFloatStateOf(0f)
         private set
     var viewH by mutableFloatStateOf(0f)
@@ -51,8 +55,8 @@ class ViewerState(pages: List<PageSize>) {
     val layout: DocLayout
         get() {
             val c = cachedLayout
-            if (c != null && c.pages === pages && c.mode == mode && c.viewW == viewW && c.viewH == viewH && c.padTop == padTop && c.padBottom == padBottom) return c
-            return DocLayout(pages, mode, viewW, viewH, gap, margin, padTop, padBottom).also { cachedLayout = it }
+            if (c != null && c.pages === pages && c.mode == mode && c.spread == spread && c.viewW == viewW && c.viewH == viewH && c.padTop == padTop && c.padBottom == padBottom) return c
+            return DocLayout(pages, mode, viewW, viewH, gap, margin, padTop, padBottom, spread).also { cachedLayout = it }
         }
 
     /** Continuous pages zoom out past fit-width; single-page mode rests on one page filling the width. */
@@ -112,10 +116,13 @@ class ViewerState(pages: List<PageSize>) {
         clamp()
     }
 
-    fun switchMode(m: PageMode) {
-        if (m == mode) return
+    /** Change the page mode, and for Continuous whether pages go in pairs ([s]); stays on the same page. */
+    fun switchMode(m: PageMode, s: Spread = Spread.None) {
+        val sp = if (m == PageMode.Continuous) s else Spread.None
+        if (m == mode && sp == spread) return
         val page = currentPage
         mode = m
+        spread = sp
         zoom = 1f
         goToPage(page)
     }

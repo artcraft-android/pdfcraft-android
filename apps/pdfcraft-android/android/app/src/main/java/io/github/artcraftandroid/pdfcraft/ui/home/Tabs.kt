@@ -396,6 +396,11 @@ private fun Preferences(vm: AppViewModel) {
         PdfSwitch(vm.searchCount, { vm.updateSearchCount(it) })
     }
     Text(stringResource(R.string.home_search_count_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
+    Spacer(Modifier.height(8.dp))
+    SheetRow(null, stringResource(R.string.home_two_pages_on_phones), { vm.updateTwoPagesOnPhones(!vm.twoPagesOnPhones) }) {
+        PdfSwitch(vm.twoPagesOnPhones, { vm.updateTwoPagesOnPhones(it) })
+    }
+    Text(stringResource(R.string.home_two_pages_on_phones_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
     Spacer(Modifier.height(24.dp))
     if (authorDialog) {
         var name by remember { mutableStateOf(vm.toolPrefs.author) }

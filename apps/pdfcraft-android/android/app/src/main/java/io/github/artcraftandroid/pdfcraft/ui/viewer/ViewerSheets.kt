@@ -156,7 +156,10 @@ internal fun modifiedLabel(t: Long, yesterday: String, now: Long = System.curren
     }
 }
 
-/** View settings: Continuous, Single page, Reading Mode, then the Night Mode switch. */
+/**
+ * View settings: Continuous, Single page, Reading Mode, Two pages and Two pages with cover page
+ * (on a tablet, or a phone that Extra Features lets have them), then the Night Mode switch.
+ */
 @Composable
 fun ViewSettingsSheet(vm: AppViewModel, doc: OpenDocument) {
     val ctl = doc.controller
@@ -165,7 +168,7 @@ fun ViewSettingsSheet(vm: AppViewModel, doc: OpenDocument) {
         SheetRow(LucideIcons.GalleryVerticalEnd, stringResource(R.string.sheet_continuous), {
             vm.setPageMode(doc, PageMode.Continuous)
             ctl.sheet = ViewerSheet.None
-        }, checked = doc.viewer.mode == PageMode.Continuous && !vm.readingMode)
+        }, checked = doc.viewer.mode == PageMode.Continuous && doc.viewer.spread == Spread.None && !vm.readingMode)
         SheetRow(LucideIcons.File, stringResource(R.string.sheet_single_page), {
             vm.setPageMode(doc, PageMode.SinglePage)
             ctl.sheet = ViewerSheet.None
@@ -174,6 +177,16 @@ fun ViewSettingsSheet(vm: AppViewModel, doc: OpenDocument) {
             ctl.sheet = ViewerSheet.None
             vm.openReadingMode(doc)
         }, checked = vm.readingMode)
+        if (vm.twoPagesOffered) {
+            SheetRow(LucideIcons.Columns2, stringResource(R.string.sheet_two_pages), {
+                vm.setPageMode(doc, PageMode.Continuous, Spread.TwoPages)
+                ctl.sheet = ViewerSheet.None
+            }, checked = doc.viewer.spread == Spread.TwoPages && !vm.readingMode)
+            SheetRow(LucideIcons.BookOpen, stringResource(R.string.sheet_two_pages_cover), {
+                vm.setPageMode(doc, PageMode.Continuous, Spread.TwoPagesCover)
+                ctl.sheet = ViewerSheet.None
+            }, checked = doc.viewer.spread == Spread.TwoPagesCover && !vm.readingMode)
+        }
         GroupDivider()
         SheetRow(LucideIcons.Moon, stringResource(R.string.sheet_night_mode), { vm.setNightMode(doc, !ctl.nightMode); ctl.sheet = ViewerSheet.None }) {
             PdfSwitch(ctl.nightMode, { vm.setNightMode(doc, it); ctl.sheet = ViewerSheet.None })

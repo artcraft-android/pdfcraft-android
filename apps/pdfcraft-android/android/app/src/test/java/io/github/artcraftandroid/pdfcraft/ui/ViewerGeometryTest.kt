@@ -4,6 +4,7 @@ import androidx.compose.ui.geometry.Offset
 import io.github.artcraftandroid.pdfcraft.ui.viewer.DocLayout
 import io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode
 import io.github.artcraftandroid.pdfcraft.ui.viewer.PageSize
+import io.github.artcraftandroid.pdfcraft.ui.viewer.Spread
 import io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -219,5 +220,68 @@ class ViewerGeometryTest {
         assertEquals(5 * 1080f, s.scrollX, 0.5f)
         assertEquals(6 * 1080f, s.snapTarget(-2000f), 0.5f)
         assertEquals(5 * 1080f, s.snapTarget(0f), 0.5f)
+    }
+
+    @Test
+    fun twoPagesPairsPagesEitherSideOfTheMiddle() {
+        val l = DocLayout(List(5) { letter }, PageMode.Continuous, 1000f, 2000f, gap = 20f, margin = 0f, padTop = 100f, padBottom = 50f, spread = Spread.TwoPages)
+        // two pages and the gap fill the width
+        assertEquals(490f, l.rects[0].width, 0.01f)
+        assertEquals(490f, l.rects[0].right, 0.01f)
+        assertEquals(510f, l.rects[1].left, 0.01f)
+        // a row's pages share its top; the next row starts a gap below
+        assertEquals(100f, l.rects[0].top, 0.01f)
+        assertEquals(l.rects[0].top, l.rects[1].top, 0.01f)
+        assertEquals(l.rects[0].bottom + 20f, l.rects[2].top, 0.01f)
+        // the odd page out is on the left of the last row
+        assertEquals(490f, l.rects[4].right, 0.01f)
+        assertEquals(l.rects[4].bottom + 50f, l.height, 0.01f)
+    }
+
+    @Test
+    fun twoPagesWithCoverStartsWithThePageAloneOnTheRight() {
+        val l = DocLayout(List(4) { letter }, PageMode.Continuous, 1000f, 2000f, 20f, 0f, 0f, 0f, Spread.TwoPagesCover)
+        assertEquals(510f, l.rects[0].left, 0.01f)
+        // then 2 and 3 (indexes 1 and 2) side by side, and 4 alone on the left
+        assertEquals(l.rects[0].bottom + 20f, l.rects[1].top, 0.01f)
+        assertEquals(490f, l.rects[1].right, 0.01f)
+        assertEquals(510f, l.rects[2].left, 0.01f)
+        assertEquals(l.rects[1].top, l.rects[2].top, 0.01f)
+        assertEquals(490f, l.rects[3].right, 0.01f)
+    }
+
+    @Test
+    fun twoPagesHitTestingAndRowSteps() {
+        val l = DocLayout(List(10) { letter }, PageMode.Continuous, 1000f, 2000f, 20f, 0f, 0f, 0f, Spread.TwoPages)
+        val row2 = l.rects[4].top + 5f
+        assertEquals(4, l.pageAt(200f, row2))
+        assertEquals(5, l.pageAt(800f, row2))
+        // the gutter belongs to neither page, and the nearer page is picked; the middle goes left
+        assertNull(l.pageAt(500f, row2))
+        assertEquals(5, l.nearestPage(505f, row2))
+        assertEquals(4, l.nearestPage(500f, row2))
+        // in the gap below a row: the closer row, on the side of x
+        assertEquals(7, l.nearestPage(800f, l.rects[5].bottom + 15f))
+        assertEquals(5, l.nearestPage(800f, l.rects[5].bottom + 5f))
+        // a row in view brings both its pages
+        assertEquals(4..5, l.visible(0f, row2, 1000f, row2 + 10f))
+        // Page Down and Page Up move a row
+        assertEquals(6, l.stepRow(4, 1))
+        assertEquals(6, l.stepRow(5, 1))
+        assertEquals(2, l.stepRow(5, -1))
+        assertEquals(0, l.stepRow(1, -1))
+        assertEquals(9, l.stepRow(9, 1))
+    }
+
+    @Test
+    fun switchingToTwoPagesStaysOnThePage() {
+        val s = state(List(20) { letter })
+        s.goToPage(7)
+        s.switchMode(PageMode.Continuous, Spread.TwoPages)
+        assertEquals(Spread.TwoPages, s.spread)
+        // index 7 shares a row with index 6, which counts as the current page
+        assertEquals(6, s.currentPage)
+        s.switchMode(PageMode.SinglePage, Spread.TwoPages)
+        assertEquals(Spread.None, s.spread)
     }
 }

@@ -167,6 +167,8 @@
     <string name="home_status_bar_in_documents_body">A barra de status aparece junto com as barras de ferramentas. Ao tocar para ocultá-las, a página ocupa a tela toda, inclusive ao redor da câmera.</string>
     <string name="home_search_count">Mostrar o número de resultados da pesquisa</string>
     <string name="home_search_count_body">A opção Localizar no documento mostra o resultado atual e o total, como 3 de 12.</string>
+    <string name="home_two_pages_on_phones">Visualizações de duas páginas em celulares</string>
+    <string name="home_two_pages_on_phones_body">As configurações de visualização também oferecem Duas páginas e Duas páginas com capa no celular, úteis na horizontal. Os tablets sempre as têm.</string>
     <string name="home_section_about">Sobre</string>
     <string name="home_version">Versão %1$s (mecanismo %2$s)</string>
     <string name="home_version_copied">Versão copiada</string>
@@ -439,6 +441,8 @@
     <string name="sheet_redo_action">Refazer %1$s</string>
     <string name="sheet_continuous">Contínuo</string>
     <string name="sheet_single_page">Página única</string>
+    <string name="sheet_two_pages">Duas páginas</string>
+    <string name="sheet_two_pages_cover">Duas páginas com capa</string>
     <string name="sheet_reading_mode">Modo de leitura</string>
     <string name="sheet_night_mode">Modo noturno</string>
     <string name="sheet_tab_contents">Sumário</string>

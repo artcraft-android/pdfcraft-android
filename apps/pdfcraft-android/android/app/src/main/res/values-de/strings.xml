@@ -224,6 +224,8 @@
     <string name="home_status_bar_in_documents_body">Die Statusleiste wird zusammen mit den Symbolleisten angezeigt. Wenn du sie durch Tippen ausblendest, nutzt die Seite den gesamten Bildschirm, auch den Bereich um die Kamera.</string>
     <string name="home_search_count">Anzahl der Suchergebnisse anzeigen</string>
     <string name="home_search_count_body">Bei der Dokumentsuche wird angezeigt, welches Ergebnis du gerade ansiehst und wie viele es insgesamt gibt, z. B. 3 von 12.</string>
+    <string name="home_two_pages_on_phones">Zweiseitenansichten auf Smartphones</string>
+    <string name="home_two_pages_on_phones_body">Die Anzeigeeinstellungen bieten auch auf dem Smartphone „Zwei Seiten“ und „Zwei Seiten mit Deckblatt“, praktisch im Querformat. Tablets haben sie immer.</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">Über</string>
@@ -662,6 +664,8 @@
     <!-- Viewer sheets: View settings -->
     <string name="sheet_continuous">Fortlaufend</string>
     <string name="sheet_single_page">Einzelseite</string>
+    <string name="sheet_two_pages">Zwei Seiten</string>
+    <string name="sheet_two_pages_cover">Zwei Seiten mit Deckblatt</string>
     <string name="sheet_reading_mode">Lesemodus</string>
     <string name="sheet_night_mode">Nachtmodus</string>
 

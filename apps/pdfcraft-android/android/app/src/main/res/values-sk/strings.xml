@@ -173,6 +173,8 @@
     <string name="home_status_bar_in_documents_body">Stavový riadok sa zobrazuje spolu s panelmi nástrojov. Keď ich ťuknutím skryjete, strana využije celú obrazovku, vrátane oblasti okolo kamery.</string>
     <string name="home_search_count">Zobraziť počet výsledkov vyhľadávania</string>
     <string name="home_search_count_body">Funkcia Nájsť v dokumente zobrazí, na ktorom výsledku ste a koľko ich je, napríklad 3 z 12.</string>
+    <string name="home_two_pages_on_phones">Zobrazenia dvoch strán v telefónoch</string>
+    <string name="home_two_pages_on_phones_body">Nastavenia zobrazenia ponúkajú aj v telefóne možnosti Dve strany a Dve strany s titulnou stranou, čo sa hodí na šírku. Tablety ich majú vždy.</string>
     <string name="home_section_about">O aplikácii</string>
     <string name="home_version">Verzia %1$s, jadro %2$s</string>
     <string name="home_version_copied">Verzia skopírovaná</string>
@@ -449,6 +451,8 @@
     <string name="sheet_redo_action">Znova: %1$s</string>
     <string name="sheet_continuous">Priebežne</string>
     <string name="sheet_single_page">Jedna strana</string>
+    <string name="sheet_two_pages">Dve strany</string>
+    <string name="sheet_two_pages_cover">Dve strany s titulnou stranou</string>
     <string name="sheet_reading_mode">Režim čítania</string>
     <string name="sheet_night_mode">Nočný režim</string>
     <string name="sheet_tab_contents">Obsah</string>

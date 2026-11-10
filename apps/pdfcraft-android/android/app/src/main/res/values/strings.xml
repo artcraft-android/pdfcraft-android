@@ -232,6 +232,8 @@
     <string name="home_status_bar_in_documents_body">The status bar shows with the toolbars. When you tap to hide them, the page uses the whole screen, around the camera too.</string>
     <string name="home_search_count">Show the number of search results</string>
     <string name="home_search_count_body">Find in a document shows which result you\'re on and how many there are, such as 3 of 12.</string>
+    <string name="home_two_pages_on_phones">Two-page views on phones</string>
+    <string name="home_two_pages_on_phones_body">View settings also offers Two pages and Two pages with cover page on a phone, handy in landscape. Tablets always have them.</string>
 
     <!-- Settings: About PdfCraft -->
     <string name="home_section_about">About</string>
@@ -671,6 +673,8 @@
     <!-- Viewer sheets: View settings -->
     <string name="sheet_continuous">Continuous</string>
     <string name="sheet_single_page">Single page</string>
+    <string name="sheet_two_pages">Two pages</string>
+    <string name="sheet_two_pages_cover">Two pages with cover page</string>
     <string name="sheet_reading_mode">Reading Mode</string>
     <string name="sheet_night_mode">Night Mode</string>
 

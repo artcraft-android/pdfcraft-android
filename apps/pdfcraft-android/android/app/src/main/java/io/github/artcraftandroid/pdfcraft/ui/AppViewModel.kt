@@ -229,7 +229,7 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
             doc.writable = writable
             loadLinks(eng, doc)
             doc.controller.nightMode = savedNightMode
-            if (savedPageMode != doc.viewer.mode) doc.viewer.switchMode(savedPageMode)
+            doc.viewer.switchMode(savedPageMode, savedSpread)
             // a file left in Reading Mode reopens in it, unless it was opened for a tool
             readingMode = recent?.reading == true && pendingTool == null
             document = doc
@@ -593,8 +593,9 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
             ctrl && (keyCode == android.view.KeyEvent.KEYCODE_EQUALS || keyCode == android.view.KeyEvent.KEYCODE_PLUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ADD) -> v.zoomStep(1, center)
             ctrl && (keyCode == android.view.KeyEvent.KEYCODE_MINUS || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_SUBTRACT) -> v.zoomStep(-1, center)
             ctrl -> return false
-            keyCode == android.view.KeyEvent.KEYCODE_N || keyCode == android.view.KeyEvent.KEYCODE_PAGE_DOWN -> v.goToPage(v.currentPage + 1)
-            keyCode == android.view.KeyEvent.KEYCODE_P || keyCode == android.view.KeyEvent.KEYCODE_PAGE_UP -> v.goToPage(v.currentPage - 1)
+            // a row at a time, so Two pages moves a whole spread
+            keyCode == android.view.KeyEvent.KEYCODE_N || keyCode == android.view.KeyEvent.KEYCODE_PAGE_DOWN -> v.goToPage(v.layout.stepRow(v.currentPage, 1))
+            keyCode == android.view.KeyEvent.KEYCODE_P || keyCode == android.view.KeyEvent.KEYCODE_PAGE_UP -> v.goToPage(v.layout.stepRow(v.currentPage, -1))
             keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN -> v.setScroll(v.scrollX, v.scrollY + v.viewH * 0.1f)
             keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP -> v.setScroll(v.scrollX, v.scrollY - v.viewH * 0.1f)
             keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> v.setScroll(v.scrollX + v.viewW * 0.1f, v.scrollY)
@@ -829,14 +830,43 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
         get() = if (appPrefs.getString("pageMode", "continuous") == "single") io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode.SinglePage
         else io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode.Continuous
 
+    /** Whether Continuous pages open in pairs (Two pages), when the two-page views are offered. */
+    val savedSpread: io.github.artcraftandroid.pdfcraft.ui.viewer.Spread
+        get() = when (appPrefs.getString("pageMode", "continuous")) {
+            "two" -> io.github.artcraftandroid.pdfcraft.ui.viewer.Spread.TwoPages
+            "twocover" -> io.github.artcraftandroid.pdfcraft.ui.viewer.Spread.TwoPagesCover
+            else -> null
+        }?.takeIf { twoPagesOffered } ?: io.github.artcraftandroid.pdfcraft.ui.viewer.Spread.None
+
+    /**
+     * Two pages and Two pages with cover page are in View settings: on a tablet, as in the
+     * reference, and on a phone when Extra Features asks for them (#59).
+     */
+    val twoPagesOffered: Boolean
+        get() = twoPagesOnPhones || getApplication<Application>().resources.configuration.smallestScreenWidthDp >= 600
+
+    var twoPagesOnPhones by mutableStateOf(appPrefs.getBoolean("twoPagesOnPhones", false))
+        private set
+
+    fun updateTwoPagesOnPhones(on: Boolean) {
+        twoPagesOnPhones = on
+        appPrefs.edit().putBoolean("twoPagesOnPhones", on).apply()
+    }
+
     val savedNightMode: Boolean get() = appPrefs.getBoolean("nightMode", false)
 
-    fun setPageMode(doc: OpenDocument, mode: io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode) {
+    fun setPageMode(doc: OpenDocument, mode: io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode, spread: io.github.artcraftandroid.pdfcraft.ui.viewer.Spread = io.github.artcraftandroid.pdfcraft.ui.viewer.Spread.None) {
         // leaving Reading Mode: a canvas laid out already followed the page read; else it shows it on layout
         if (readingMode && doc.viewer.viewW > 0f) pendingPage = null
         readingMode = false
-        doc.viewer.switchMode(mode)
-        appPrefs.edit().putString("pageMode", if (mode == io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode.SinglePage) "single" else "continuous").apply()
+        doc.viewer.switchMode(mode, spread)
+        val saved = when {
+            mode == io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode.SinglePage -> "single"
+            spread == io.github.artcraftandroid.pdfcraft.ui.viewer.Spread.TwoPages -> "two"
+            spread == io.github.artcraftandroid.pdfcraft.ui.viewer.Spread.TwoPagesCover -> "twocover"
+            else -> "continuous"
+        }
+        appPrefs.edit().putString("pageMode", saved).apply()
     }
 
     fun setNightMode(doc: OpenDocument, on: Boolean) {

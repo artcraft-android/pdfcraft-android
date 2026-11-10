@@ -184,6 +184,8 @@
     <string name="home_status_bar_in_documents_body">يظهر شريط الحالة مع أشرطة الأدوات. عند الضغط لإخفائها، يستخدم المستند الشاشة كاملة، بما فيها المساحة حول الكاميرا.</string>
     <string name="home_search_count">إظهار عدد نتائج البحث</string>
     <string name="home_search_count_body">يعرض البحث في المستند رقم النتيجة الحالية وعدد النتائج كلها، مثل 3 من 12.</string>
+    <string name="home_two_pages_on_phones">عرض صفحتين على الهواتف</string>
+    <string name="home_two_pages_on_phones_body">تعرض إعدادات العرض أيضًا «صفحتان» و«صفحتان مع صفحة الغلاف» على الهاتف، وهذا مفيد في الوضع الأفقي. وتتوفر دائمًا على الأجهزة اللوحية.</string>
     <string name="home_section_about">حول التطبيق</string>
     <string name="home_version">الإصدار %1$s (المحرك %2$s)</string>
     <string name="home_version_copied">تم نسخ الإصدار</string>
@@ -464,6 +466,8 @@
     <string name="sheet_redo_action">إعادة %1$s</string>
     <string name="sheet_continuous">متواصل</string>
     <string name="sheet_single_page">صفحة واحدة</string>
+    <string name="sheet_two_pages">صفحتان</string>
+    <string name="sheet_two_pages_cover">صفحتان مع صفحة الغلاف</string>
     <string name="sheet_reading_mode">وضع القراءة</string>
     <string name="sheet_night_mode">الوضع الليلي</string>
     <string name="sheet_tab_contents">الفهرس</string>
