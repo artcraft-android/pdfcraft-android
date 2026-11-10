@@ -164,6 +164,8 @@
     <string name="home_section_screen">Nastavenie obrazovky</string>
     <string name="home_keep_screen_on">Ponechať zapnutú obrazovku</string>
     <string name="home_keep_screen_on_body">Počas čítania ponechá obrazovku zapnutú až na 30 minút bez dotyku.</string>
+    <string name="home_eink_mode">Režim e-ink</string>
+    <string name="home_eink_mode_body">Pre obrazovky s elektronickým papierom: čiernobielo bez sivých pozadí, bez animácií a strany sa zastavia tam, kde zdvihnete prst. Animácie vypne aj nastavenie Android Odstrániť animácie.</string>
     <string name="home_section_keyboard">Klávesnica</string>
     <string name="home_keyboard_shortcuts">Klávesové skratky</string>
     <string name="home_keyboard_shortcuts_body">S pripojenou klávesnicou: N alebo Page Down pre ďalšiu stranu, P alebo Page Up pre predchádzajúcu, šípky na posúvanie, Ctrl+P na tlač a Ctrl plus alebo mínus na priblíženie či oddialenie.</string>

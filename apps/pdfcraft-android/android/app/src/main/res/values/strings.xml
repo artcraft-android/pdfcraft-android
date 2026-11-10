@@ -222,6 +222,8 @@
     <string name="home_section_screen">Screen setting</string>
     <string name="home_keep_screen_on">Keep the screen on</string>
     <string name="home_keep_screen_on_body">Keeps the screen on while you read, for up to 30 minutes without a touch.</string>
+    <string name="home_eink_mode">E-ink mode</string>
+    <string name="home_eink_mode_body">For e-paper screens: black and white with no grey backgrounds, no animations, and pages that stop where your finger lifts. Android\'s Remove animations setting also turns the animations off.</string>
     <string name="home_section_keyboard">Keyboard</string>
     <string name="home_keyboard_shortcuts">Keyboard shortcuts</string>
     <!-- N, P, Page Down, Page Up, Ctrl+P, Ctrl, + and − are keys on the keyboard -->

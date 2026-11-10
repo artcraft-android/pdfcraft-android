@@ -144,6 +144,42 @@ val DarkPdfColors = PdfColors(
     switchOn = Color(0xFF4B75FF),
 )
 
+/**
+ * E-ink mode's colours (#13): white, black text and icons, black for what's selected, black
+ * edges around the pages on a white desk, one grey for what's pressed, and no dimming behind
+ * sheets and dialogs. E-paper shows these without the ghosting greys and tints leave.
+ */
+val EInkPdfColors = LightPdfColors.copy(
+    surfaceRaised = Color(0xFFFFFFFF),
+    pressed = Color(0xFFD0D0D0),
+    desk = Color(0xFFFFFFFF),
+    pageEdge = Color(0xFF000000),
+    text = Color(0xFF000000),
+    textSecondary = Color(0xFF000000),
+    textTertiary = Color(0xFF000000),
+    icon = Color(0xFF000000),
+    divider = Color(0xFF000000),
+    handle = Color(0xFF000000),
+    accent = Color(0xFF000000),
+    onAccent = Color(0xFFFFFFFF),
+    button = Color(0xFF000000),
+    red = Color(0xFF000000),
+    scrim = Color(0x00000000),
+    toast = Color(0xFF000000),
+    onToast = Color(0xFFFFFFFF),
+    label = Color(0xFF000000),
+    cornerMark = Color(0xFF000000),
+    toolAccent = Color(0xFF000000),
+    navBand = Color(0xFFFFFFFF),
+    menu = Color(0xFFFFFFFF),
+    pageCard = Color(0xFFFFFFFF),
+    home = Color(0xFFFFFFFF),
+    navigatorText = Color(0xFF000000),
+    replyBorder = Color(0xFF000000),
+    switchOff = Color(0xFFD0D0D0),
+    switchOn = Color(0xFF000000),
+)
+
 val LocalPdfColors = staticCompositionLocalOf { LightPdfColors }
 
 /** The colours in effect. */
@@ -152,14 +188,19 @@ val pdfColors: PdfColors @Composable get() = LocalPdfColors.current
 /** How the app chooses light or dark (Preferences ▸ Theme). */
 enum class ThemeChoice { System, Light, Dark }
 
+/** The app's look: light or dark as [choice] says, or E-ink mode's black and white ([eInk]). */
 @Composable
-fun PdfcraftTheme(choice: ThemeChoice = ThemeChoice.System, content: @Composable () -> Unit) {
-    val dark = when (choice) {
+fun PdfcraftTheme(choice: ThemeChoice = ThemeChoice.System, eInk: Boolean = false, content: @Composable () -> Unit) {
+    val dark = !eInk && when (choice) {
         ThemeChoice.System -> isSystemInDarkTheme()
         ThemeChoice.Light -> false
         ThemeChoice.Dark -> true
     }
-    val c = if (dark) DarkPdfColors else LightPdfColors
+    val c = when {
+        eInk -> EInkPdfColors
+        dark -> DarkPdfColors
+        else -> LightPdfColors
+    }
     val scheme: ColorScheme = if (dark) {
         darkColorScheme(primary = c.accent, onPrimary = c.onAccent, surface = c.surface, onSurface = c.text, background = c.surface, onBackground = c.text,
             surfaceVariant = c.surfaceRaised, onSurfaceVariant = c.textSecondary, outline = c.divider, error = c.red, surfaceContainer = c.surfaceRaised,

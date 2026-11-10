@@ -214,6 +214,8 @@
     <string name="home_section_screen">Bildschirmeinstellung</string>
     <string name="home_keep_screen_on">Bildschirm eingeschaltet lassen</string>
     <string name="home_keep_screen_on_body">Der Bildschirm bleibt beim Lesen bis zu 30 Minuten ohne Berührung eingeschaltet.</string>
+    <string name="home_eink_mode">E-Ink-Modus</string>
+    <string name="home_eink_mode_body">Für E-Paper-Bildschirme: Schwarz-Weiß ohne graue Hintergründe, ohne Animationen, und Seiten halten an, wo du den Finger hebst. Die Android-Einstellung „Animationen entfernen“ schaltet die Animationen ebenfalls aus.</string>
     <string name="home_section_keyboard">Tastatur</string>
     <string name="home_keyboard_shortcuts">Tastenkombinationen</string>
     <!-- N, P, Page Down, Page Up, Ctrl+P, Ctrl, + and − are keys on the keyboard -->

@@ -221,6 +221,8 @@
     <string name="home_section_screen">Impostazioni schermo</string>
     <string name="home_keep_screen_on">Mantieni lo schermo acceso</string>
     <string name="home_keep_screen_on_body">Mantiene lo schermo acceso durante la lettura, fino a 30 minuti senza interazioni.</string>
+    <string name="home_eink_mode">Modalità e-ink</string>
+    <string name="home_eink_mode_body">Per gli schermi e-paper: bianco e nero senza sfondi grigi, senza animazioni e con le pagine che si fermano dove sollevi il dito. Anche l\'impostazione Rimuovi animazioni di Android disattiva le animazioni.</string>
     <string name="home_section_keyboard">Tastiera</string>
     <string name="home_keyboard_shortcuts">Scorciatoie da tastiera</string>
     <string name="home_keyboard_shortcuts_body">Con una tastiera collegata: N o PagGiù per la pagina successiva, P o PagSu per quella precedente, i tasti freccia per scorrere, Ctrl+P per stampare, Ctrl e + o − per modificare lo zoom.</string>

@@ -175,6 +175,8 @@
     <string name="home_section_screen">إعداد الشاشة</string>
     <string name="home_keep_screen_on">إبقاء الشاشة مضاءة</string>
     <string name="home_keep_screen_on_body">تبقى الشاشة مضاءة أثناء القراءة لمدة تصل إلى ٣٠ دقيقة دون لمسها.</string>
+    <string name="home_eink_mode">وضع الحبر الإلكتروني</string>
+    <string name="home_eink_mode_body">لشاشات الورق الإلكتروني: أبيض وأسود بلا خلفيات رمادية ولا رسوم متحركة، وتتوقف الصفحات حيث ترفع إصبعك. كما يوقف إعداد «إزالة الرسوم المتحركة» في Android الرسوم المتحركة.</string>
     <string name="home_section_keyboard">لوحة المفاتيح</string>
     <string name="home_keyboard_shortcuts">اختصارات لوحة المفاتيح</string>
     <string name="home_keyboard_shortcuts_body">عند توصيل لوحة مفاتيح: N أو Page Down للصفحة التالية، وP أو Page Up للسابقة، والأسهم للتمرير، وCtrl+P للطباعة، وCtrl مع + أو − للتكبير والتصغير.</string>

@@ -158,6 +158,8 @@
     <string name="home_section_screen">Configuração da tela</string>
     <string name="home_keep_screen_on">Manter a tela ligada</string>
     <string name="home_keep_screen_on_body">Mantém a tela ligada enquanto você lê, por até 30 minutos sem tocar nela.</string>
+    <string name="home_eink_mode">Modo de tinta eletrônica</string>
+    <string name="home_eink_mode_body">Para telas de papel eletrônico: preto e branco sem fundos cinza, sem animações e com páginas que param onde você levanta o dedo. A configuração Remover animações do Android também desativa as animações.</string>
     <string name="home_section_keyboard">Teclado</string>
     <string name="home_keyboard_shortcuts">Atalhos do teclado</string>
     <string name="home_keyboard_shortcuts_body">Com um teclado conectado: N ou Page Down para a próxima página, P ou Page Up para a anterior, as setas para rolar, Ctrl+P para imprimir e Ctrl e + ou − para ampliar ou reduzir.</string>

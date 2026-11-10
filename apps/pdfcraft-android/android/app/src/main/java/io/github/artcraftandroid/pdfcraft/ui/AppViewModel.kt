@@ -916,6 +916,16 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
         appPrefs.edit().putBoolean("keepScreenOn", on).apply()
     }
 
+    /** E-ink mode (Preferences, Screen setting; #13): black and white, no animations, no fling. */
+    var eInkMode by mutableStateOf(appPrefs.getBoolean("eInkMode", false).also { AppMotion.eInk = it })
+        private set
+
+    fun updateEInkMode(on: Boolean) {
+        eInkMode = on
+        AppMotion.eInk = on
+        appPrefs.edit().putBoolean("eInkMode", on).apply()
+    }
+
     /** The viewer's keyboard shortcuts (Preferences; off until turned on, as the reference has them). */
     var keyboardShortcuts by mutableStateOf(appPrefs.getBoolean("keyboardShortcuts", false))
         private set

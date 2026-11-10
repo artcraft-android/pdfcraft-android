@@ -374,6 +374,11 @@ private fun Preferences(vm: AppViewModel) {
         PdfSwitch(vm.keepScreenOn, { vm.updateKeepScreenOn(it) })
     }
     Text(stringResource(R.string.home_keep_screen_on_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
+    Spacer(Modifier.height(8.dp))
+    SheetRow(null, stringResource(R.string.home_eink_mode), { vm.updateEInkMode(!vm.eInkMode) }) {
+        PdfSwitch(vm.eInkMode, { vm.updateEInkMode(it) })
+    }
+    Text(stringResource(R.string.home_eink_mode_body), color = c.textSecondary, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp))
     SheetDivider()
     Section(stringResource(R.string.home_section_keyboard))
     SheetRow(null, stringResource(R.string.home_keyboard_shortcuts), { vm.updateKeyboardShortcuts(!vm.keyboardShortcuts) }) {

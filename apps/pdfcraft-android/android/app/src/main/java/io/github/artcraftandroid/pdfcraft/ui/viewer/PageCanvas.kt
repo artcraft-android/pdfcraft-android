@@ -260,7 +260,8 @@ private suspend fun settle(state: ViewerState, velocity: Offset, density: Float)
         anim.animateTo(target, spring(stiffness = 600f), initialVelocity = -velocity.x) { state.setScroll(value, 0f) }
         return
     }
-    if (velocity.getDistance() < 50f) return
+    // E-ink mode: the page stops where the finger lifts (a fling's glide would redraw the panel)
+    if (velocity.getDistance() < 50f || io.github.artcraftandroid.pdfcraft.ui.AppMotion.eInk) return
     val anim: Animatable<Offset, AnimationVector2D> = Animatable(Offset.Zero, Offset.VectorConverter)
     var last = Offset.Zero
     anim.animateDecay(velocity, splineBasedDecay(androidx.compose.ui.unit.Density(density))) {

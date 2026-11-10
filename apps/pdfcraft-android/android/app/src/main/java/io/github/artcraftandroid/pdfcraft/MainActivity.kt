@@ -24,6 +24,9 @@ import androidx.activity.viewModels
 import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.compose.ui.platform.compositionContext
+import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
+import io.github.artcraftandroid.pdfcraft.ui.AppMotion
 import io.github.artcraftandroid.pdfcraft.ui.AppRoot
 import io.github.artcraftandroid.pdfcraft.ui.AppViewModel
 import io.github.artcraftandroid.pdfcraft.ui.FilePickKind
@@ -61,10 +64,15 @@ class MainActivity : ComponentActivity() {
         )
         window.isNavigationBarContrastEnforced = false
         super.onCreate(savedInstanceState)
+        // the window's recomposer gets PdfCraft's motion scale, so E-ink mode can stop every
+        // animation (#13); otherwise it follows Android's animator duration scale, as before
+        AppMotion.readSystem(this)
+        AppMotion.eInk = vm.eInkMode
+        window.decorView.compositionContext = window.decorView.createLifecycleAwareWindowRecomposer(AppMotion, lifecycle)
         if (savedInstanceState == null) openFromIntent(intent)
         collectRequests()
         setContent {
-            PdfcraftTheme {
+            PdfcraftTheme(eInk = vm.eInkMode) {
                 AppRoot(
                     vm,
                     onBrowse = { launchSafely { pickPdf.launch(arrayOf("application/pdf")) } },
@@ -152,6 +160,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        AppMotion.readSystem(this)
         vm.onResumed()
     }
 

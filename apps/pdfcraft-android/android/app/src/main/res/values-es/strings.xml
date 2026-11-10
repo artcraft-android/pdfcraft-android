@@ -221,6 +221,8 @@
     <string name="home_section_screen">Ajuste de pantalla</string>
     <string name="home_keep_screen_on">Mantener la pantalla encendida</string>
     <string name="home_keep_screen_on_body">Mantiene la pantalla encendida mientras lees, hasta 30 minutos sin tocarla.</string>
+    <string name="home_eink_mode">Modo de tinta electrónica</string>
+    <string name="home_eink_mode_body">Para pantallas de papel electrónico: blanco y negro sin fondos grises, sin animaciones y con páginas que se detienen donde levantas el dedo. El ajuste Quitar animaciones de Android también desactiva las animaciones.</string>
     <string name="home_section_keyboard">Teclado</string>
     <string name="home_keyboard_shortcuts">Atajos de teclado</string>
     <!-- N, P, Page Down, Page Up, Ctrl+P, Ctrl, + and − are keys on the keyboard -->

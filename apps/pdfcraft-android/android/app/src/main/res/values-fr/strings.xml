@@ -214,6 +214,8 @@
     <string name="home_section_screen">Réglage de l\'écran</string>
     <string name="home_keep_screen_on">Garder l\'écran allumé</string>
     <string name="home_keep_screen_on_body">Garde l\'écran allumé pendant la lecture, jusqu\'à 30 minutes sans toucher l\'écran.</string>
+    <string name="home_eink_mode">Mode encre électronique</string>
+    <string name="home_eink_mode_body">Pour les écrans à papier électronique : noir et blanc sans fonds gris, sans animations, et les pages s\'arrêtent là où vous levez le doigt. Le réglage Supprimer les animations d\'Android désactive aussi les animations.</string>
     <string name="home_section_keyboard">Clavier</string>
     <string name="home_keyboard_shortcuts">Raccourcis clavier</string>
     <!-- N, P, Page Down, Page Up, Ctrl+P, Ctrl, + and − are keys on the keyboard -->
