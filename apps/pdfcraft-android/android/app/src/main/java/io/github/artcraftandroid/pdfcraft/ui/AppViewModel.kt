@@ -348,7 +348,28 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
     fun onPause() {
         val doc = document ?: return
         if (doc.controller.tool == ViewerTool.Draw) doc.commitTool?.invoke()
-        viewModelScope.launch { save(doc) }
+        // keep the reading place too: leaving by Home or the recents screen never closes the document
+        val place = capturePlace(doc)
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { storePlace(doc, place) }
+            save(doc)
+        }
+    }
+
+    /** Where the reader is now: page, spot, zoom and Reading Mode (read on the main thread). */
+    private class Place(val page: Int, val x: Float, val y: Float, val zoom: Float, val reading: Boolean)
+
+    private fun capturePlace(doc: OpenDocument): Place {
+        val v = doc.viewer
+        val pending = pendingPage
+        val spot = if (pending == null && v.mode == io.github.artcraftandroid.pdfcraft.ui.viewer.PageMode.Continuous) v.screenToPage(androidx.compose.ui.geometry.Offset(0f, v.padTop), nearest = true) else null
+        return Place(pending ?: spot?.page ?: v.currentPage, spot?.x ?: -1f, spot?.y ?: -1f, if (spot != null) v.zoom else 1f, readingMode)
+    }
+
+    private fun storePlace(doc: OpenDocument, p: Place) {
+        doc.source?.let { src ->
+            recents.update(src.toString()) { it.copy(lastPage = p.page, reading = p.reading, lastX = p.x, lastY = p.y, lastZoom = p.zoom) }
+        }
     }
 
     /**
