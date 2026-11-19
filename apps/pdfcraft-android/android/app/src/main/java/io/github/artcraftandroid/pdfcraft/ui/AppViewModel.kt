@@ -1786,18 +1786,13 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
     var pageMenu by mutableStateOf<io.github.artcraftandroid.pdfcraft.ui.viewer.PageMenu?>(null)
 
     /**
-     * A long press where no word is: on a picture, Edit PDF with the picture selected (the
-     * reference's picture menu leads to editing it); elsewhere, the page menu at that point.
+     * A long press where no word is: the page menu at that point, whose Edit PDF starts editing.
+     * A picture never opens Edit PDF by itself, so a stray long press on a scanned page can't
+     * start moving it.
      */
     fun longPressPage(doc: OpenDocument, at: PagePoint, screen: androidx.compose.ui.geometry.Offset) {
         val eng = engine ?: return
         viewModelScope.launch {
-            val img = imageUnder(doc, at)
-            if (img != null) {
-                enterTool(doc, io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerTool.Edit)
-                if (doc.controller.tool == io.github.artcraftandroid.pdfcraft.ui.viewer.ViewerTool.Edit) editImage = img
-                return@launch
-            }
             val glyphs = runCatching { withContext(eng.commands) { eng.session.glyphCount(doc.id, at.page.toUInt()) } }.getOrDefault(1u)
             pageMenu = io.github.artcraftandroid.pdfcraft.ui.viewer.PageMenu(doc, at, screen, pageHasText = glyphs > 0u)
         }
