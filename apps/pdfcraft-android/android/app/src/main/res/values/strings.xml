@@ -820,6 +820,7 @@
     <string name="page_menu_add_comment">Add comment</string>
     <string name="page_menu_add_text">Add text</string>
     <string name="page_menu_add_image">Add image</string>
+    <string name="page_menu_copy_image">Copy image</string>
 
     <!-- ================================================================== -->
     <!-- Editing tools: Edit PDF, Fill &amp; Sign, comment tools, the quick toolbar, forms -->
@@ -1079,6 +1080,10 @@
     <string name="msg_clip_pdf_text">PDF text</string>
     <string name="msg_copied">Copied</string>
     <string name="msg_copy_not_allowed">This document doesn\'t allow copying its text.</string>
+    <string name="msg_copy_images_not_allowed">This document doesn\'t allow copying its images.</string>
+    <string name="msg_copy_image_failed">The image couldn\'t be copied.</string>
+    <!-- Label of a picture put on the clipboard (a noun). -->
+    <string name="msg_clip_image">Image</string>
 
     <!-- Messages: Recognize text (OCR) -->
     <string name="msg_busy_preparing_ocr">Preparing text recognition…</string>

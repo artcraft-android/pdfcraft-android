@@ -92,8 +92,11 @@ data class Paragraph(
     val color: String?,
 )
 
-/** A picture Edit PDF has selected: its number on the page and where it sits (points). */
-data class EditImage(val page: Int, val number: Int, val rect: FloatArray)
+/**
+ * A picture Edit PDF has selected: its number on the page and where it sits (points). [visible]
+ * is the part on show after a crop, for copying the picture as the page draws it.
+ */
+data class EditImage(val page: Int, val number: Int, val rect: FloatArray, val visible: FloatArray = rect)
 
 /** What Edit PDF is doing: picking a paragraph, or placing new text or an image. */
 enum class EditMode { Select, AddText, AddImage }

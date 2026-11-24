@@ -51,6 +51,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /** A message for the snackbar, with an optional action. */
 data class Message(val text: String, val actionLabel: String? = null, val action: (() -> Unit)? = null)
@@ -1776,7 +1777,12 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
             val box = FloatArray(4) { k -> rect.optDouble(k).toFloat() }
             if (at.x in box[0]..box[2] && at.y in box[1]..box[3]) {
                 val full = o.optJSONArray("rect") ?: rect
-                return io.github.artcraftandroid.pdfcraft.ui.viewer.EditImage(at.page, o.optInt("image"), FloatArray(4) { k -> full.optDouble(k).toFloat() })
+                return io.github.artcraftandroid.pdfcraft.ui.viewer.EditImage(
+                    at.page,
+                    o.optInt("image"),
+                    FloatArray(4) { k -> full.optDouble(k).toFloat() },
+                    FloatArray(4) { k -> rect.optDouble(k).toFloat() },
+                )
             }
         }
         return null
@@ -1788,14 +1794,70 @@ class AppViewModel(app: Application, private val saved: SavedStateHandle) : Andr
     /**
      * A long press where no word is: the page menu at that point, whose Edit PDF starts editing.
      * A picture never opens Edit PDF by itself, so a stray long press on a scanned page can't
-     * start moving it.
+     * start moving it; when copying is allowed, the menu offers Copy image for it instead.
      */
     fun longPressPage(doc: OpenDocument, at: PagePoint, screen: androidx.compose.ui.geometry.Offset) {
         val eng = engine ?: return
         viewModelScope.launch {
+            val image = if (doc.info.allowsCopying) imageUnder(doc, at) else null
             val glyphs = runCatching { withContext(eng.commands) { eng.session.glyphCount(doc.id, at.page.toUInt()) } }.getOrDefault(1u)
-            pageMenu = io.github.artcraftandroid.pdfcraft.ui.viewer.PageMenu(doc, at, screen, pageHasText = glyphs > 0u)
+            pageMenu = io.github.artcraftandroid.pdfcraft.ui.viewer.PageMenu(doc, at, screen, pageHasText = glyphs > 0u, image = image)
         }
+    }
+
+    /**
+     * Copy [img] to the clipboard. The engine writes the picture as it is stored (a JPEG
+     * unchanged, else a lossless PNG); grouped Form artwork, which has no file of its own, is
+     * drawn the way the page shows it and copied as a PNG.
+     */
+    fun copyImage(doc: OpenDocument, img: io.github.artcraftandroid.pdfcraft.ui.viewer.EditImage) {
+        if (!doc.info.allowsCopying) {
+            tell(text(R.string.msg_copy_images_not_allowed))
+            return
+        }
+        val eng = engine ?: return
+        viewModelScope.launch {
+            try {
+                val file = withContext(Dispatchers.IO) {
+                    val dir = files.newClipboardFolder()
+                    val base = File(dir, "image")
+                    val saved = runCatching {
+                        eng.tool("image_save", mapOf("doc" to doc.id, "page" to img.page + 1, "image" to img.number, "path" to base.absolutePath))
+                    }.getOrNull()?.optString("path")?.takeIf { it.isNotEmpty() }
+                    if (saved != null) File(saved) else drawImage(eng, doc, img, File(dir, "image.png"))
+                }
+                val cm = getApplication<Application>().getSystemService(android.content.ClipboardManager::class.java)
+                val label = text(R.string.msg_clip_image)
+                cm?.setPrimaryClip(ClipData.newUri(getApplication<Application>().contentResolver, label, files.clipboardUri(file)))
+                if (android.os.Build.VERSION.SDK_INT < 33) tell(text(R.string.msg_copied))
+            } catch (e: Exception) {
+                tell(e.userMessage)
+            }
+        }
+    }
+
+    /** Draw [img]'s visible part as the page shows it into [file] (Form artwork, which has no file). */
+    private suspend fun drawImage(eng: Engine, doc: OpenDocument, img: io.github.artcraftandroid.pdfcraft.ui.viewer.EditImage, file: File): File {
+        val r = img.visible
+        val w = r[2] - r[0]
+        val h = r[3] - r[1]
+        require(w > 0f && h > 0f) { text(R.string.msg_copy_image_failed) }
+        val page = doc.info.pages.getOrNull(img.page)
+        // big enough to keep the detail of a phone screen, small enough to stay a picture
+        val scale = (1600f / maxOf(w, h)).coerceIn(2f, 6f)
+        val pageW = ((page?.width ?: w) * scale).roundToInt().coerceAtLeast(1)
+        val pageH = ((page?.height ?: h) * scale).roundToInt().coerceAtLeast(1)
+        val x = (r[0] * scale).roundToInt().coerceIn(0, pageW - 1)
+        val y = (r[1] * scale).roundToInt().coerceIn(0, pageH - 1)
+        val tw = (w * scale).roundToInt().coerceIn(1, pageW - x)
+        val th = (h * scale).roundToInt().coerceIn(1, pageH - y)
+        val bitmap = withContext(eng.renders) {
+            eng.session.renderPage(doc.id, img.page.toUInt(), scale, io.github.artcraftandroid.pdfcraft.core.TileRect(x.toUInt(), y.toUInt(), tw.toUInt(), th.toUInt())).toBitmap()
+        }
+        withContext(Dispatchers.IO) {
+            file.outputStream().use { out -> bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out) }
+        }
+        return file
     }
 
     /** Put [img] in [rect] (points): a move or a resize. */

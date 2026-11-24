@@ -27,6 +27,9 @@ class DocumentFiles(private val context: Context) {
     /** Files handed to other apps (share, print), through the FileProvider. */
     private val shareDir = File(context.cacheDir, "share").apply { mkdirs() }
 
+    /** The picture last copied to the clipboard, through the FileProvider. */
+    private val clipboardDir = File(context.cacheDir, "clipboard").apply { mkdirs() }
+
     /** Files the app creates itself (combine, create, scans) before the user saves them somewhere. */
     val createdDir = File(context.filesDir, "Created").apply { mkdirs() }
 
@@ -184,6 +187,20 @@ class DocumentFiles(private val context: Context) {
             throw IOException(context.getString(if (full) R.string.files_error_share_no_space else R.string.files_error_share), e)
         }
     }
+
+    /**
+     * A new folder in the app's space for a picture copied to the clipboard. The folder the last
+     * copy used is cleared first: the clipboard holds one picture at a time.
+     */
+    fun newClipboardFolder(): File {
+        clipboardDir.listFiles()?.forEach { it.deleteRecursively() }
+        val dir = File(clipboardDir, System.nanoTime().toString())
+        if (!dir.mkdirs()) throw IOException("can't make $dir")
+        return dir
+    }
+
+    /** [file]'s URI for the clipboard: the app pasting it may read it through the FileProvider. */
+    fun clipboardUri(file: File): Uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
 
     /** A new file in the app's own space for a document it makes, named [name] (made unique). */
     fun newCreated(name: String): File {

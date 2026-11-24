@@ -585,6 +585,7 @@
     <string name="page_menu_add_comment">إضافة تعليق</string>
     <string name="page_menu_add_text">إضافة نص</string>
     <string name="page_menu_add_image">إضافة صورة</string>
+    <string name="page_menu_copy_image">نسخ الصورة</string>
     <string name="toolbar_label_password">كلمة المرور</string>
     <string name="toolbar_label_combine">دمج</string>
     <string name="toolbar_label_compress">ضغط</string>
@@ -746,6 +747,9 @@
     <string name="msg_clip_pdf_text">نص PDF</string>
     <string name="msg_copied">تم النسخ</string>
     <string name="msg_copy_not_allowed">لا يسمح هذا المستند بنسخ نصه.</string>
+    <string name="msg_copy_images_not_allowed">لا يسمح هذا المستند بنسخ صوره.</string>
+    <string name="msg_copy_image_failed">تعذّر نسخ الصورة.</string>
+    <string name="msg_clip_image">صورة</string>
     <string name="msg_busy_preparing_ocr">جارٍ تجهيز التعرّف على النص…</string>
     <string name="msg_ocr_not_installed">التعرّف على النص غير مثبّت في هذه النسخة.</string>
     <string name="msg_busy_recognizing">جارٍ التعرّف على النص…</string>

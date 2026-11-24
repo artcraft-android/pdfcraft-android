@@ -46,8 +46,11 @@ import io.github.artcraftandroid.pdfcraft.ui.OpenDocument
 import io.github.artcraftandroid.pdfcraft.ui.pdfColors
 import kotlin.math.roundToInt
 
-/** A long press on an empty part of a page: the menu of what can start there. */
-class PageMenu(val doc: OpenDocument, val at: PagePoint, val screen: Offset, val pageHasText: Boolean)
+/**
+ * A long press on a page: the menu of what can start there. [image] is the picture under the
+ * press, when the document allows copying it: the menu offers Copy image for it.
+ */
+class PageMenu(val doc: OpenDocument, val at: PagePoint, val screen: Offset, val pageHasText: Boolean, val image: EditImage? = null)
 
 /**
  * The reference's page menu: a row of the commenting tools that start at the pressed point
@@ -85,6 +88,9 @@ fun PageMenuView(vm: AppViewModel, menu: PageMenu) {
             }
             Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(1.dp).background(c.divider))
             Spacer(Modifier.height(8.dp))
+            menu.image?.let { img ->
+                PageMenuRow(LucideIcons.Copy, stringResource(R.string.page_menu_copy_image)) { close(); vm.copyImage(doc, img) }
+            }
             if (!menu.pageHasText) PageMenuRow(LucideIcons.ScanText, stringResource(R.string.common_tool_recognize_text)) { close(); vm.recognizeText(doc) }
             PageMenuRow(LucideIcons.Crop, stringResource(R.string.common_tool_crop)) { close(); vm.openCrop(doc) }
             PageMenuRow(LucideIcons.FilePenLine, stringResource(R.string.common_tool_edit_pdf)) { close(); vm.enterTool(doc, ViewerTool.Edit) }
