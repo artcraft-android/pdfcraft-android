@@ -149,6 +149,13 @@ pub(crate) fn get(
         return Err(InvalidEncryption);
     }
 
+    // PdfCraft patch: (see vendor/README.md hayro-syntax (35)) revisions 2–4 take the file key
+    // from one MD5 hash, so it is at most 16 bytes (`/Length` 40 to 128). A longer one, as
+    // `/V 5` with `/R 3` or `/Length 256` gives, is invalid encryption rather than a panic.
+    if revision <= 4 && byte_length > 16 {
+        return Err(InvalidEncryption);
+    }
+
     let owner_string = dict.get::<object::String<'_>>(O).ok_or(InvalidEncryption)?;
     let user_string = dict.get::<object::String<'_>>(U).ok_or(InvalidEncryption)?;
     let permissions = {
@@ -586,13 +593,16 @@ fn decryption_key_rev1234(
     // MD5 hash and pass the first n bytes of the output as input into a new MD5 hash,
     // where n is the number of bytes of the file encryption key as defined by the value
     // of the encryption dictionary's `Length` entry.
+    // PdfCraft patch: (hayro-syntax (35)) never more bytes than the hash has; `get` refuses
+    // longer keys before this, so the bound only keeps a direct caller from panicking.
+    let n = usize::from(byte_length).min(hash.len());
     if revision >= 3 {
         for _ in 0..50 {
-            hash = md5::calculate(&hash[..byte_length as usize]);
+            hash = md5::calculate(&hash[..n]);
         }
     }
 
-    let decryption_key = hash[..byte_length as usize].to_vec();
+    let decryption_key = hash[..n].to_vec();
     Ok(decryption_key)
 }
 
@@ -901,5 +911,59 @@ mod pdfcraft_password_tests {
         let user = rev56_dict(6, "caf\u{E9}".as_bytes(), b"owner", &key);
         assert_eq!(unlock(&user, "cafe\u{301}"), ok, "R6");
         assert_eq!(unlock(&user, "cafe"), wrong, "R6");
+    }
+}
+
+#[cfg(test)]
+mod pdfcraft_key_length_tests {
+    use super::*;
+    use crate::Pdf;
+    use crate::reader::{Reader, ReaderContext, ReaderExt};
+
+    /// What `get` makes of the `/Encrypt` dictionary `dict` with the empty password.
+    fn decryptor(dict: &[u8]) -> Result<Decryptor, DecryptionError> {
+        let dict = Reader::new(dict).read_with_context::<Dict<'_>>(&ReaderContext::dummy());
+        get(&dict.unwrap(), b"", b"")
+    }
+
+    #[test]
+    fn a_legacy_key_longer_than_the_md5_hash_is_invalid_not_a_panic() {
+        // Revisions 2–4 with a key of more than 16 bytes: the slice past the 16-byte hash
+        // panicked (found by fuzzing).
+        for dict in [
+            "<< /Filter /Standard /V 5 /R 3 /O <00> /U <00> /P -4 /StmF /StdCF /StrF /StdCF >>",
+            "<< /Filter /Standard /V 2 /R 3 /Length 256 /O <00> /U <00> /P -4 >>",
+            "<< /Filter /Standard /V 4 /R 4 /Length 256 /O <00> /U <00> /P -4 \
+             /CF << /StdCF << /CFM /AESV2 >> >> /StmF /StdCF /StrF /StdCF >>",
+        ] {
+            assert!(
+                matches!(decryptor(dict.as_bytes()), Err(InvalidEncryption)),
+                "{dict}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_keys_of_40_to_128_bits_still_reach_the_password_check() {
+        for length in [40, 128] {
+            let dict = alloc::format!(
+                "<< /Filter /Standard /V 2 /R 3 /Length {length} /O <00> /U <00> /P -4 >>"
+            );
+            assert!(
+                matches!(
+                    decryptor(dict.as_bytes()),
+                    Err(DecryptionError::PasswordProtected)
+                ),
+                "{length}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_whose_repaired_table_meets_such_a_dictionary_does_not_open() {
+        // The minimized fuzzer input: no cross-reference table, so the table is rebuilt by
+        // scanning, which reads `/Encrypt` there.
+        let data = b"1 0 obj<</Pages R>>14 0 obj<</Filter/Standard/O<>/P - /R 3/StmF//StrF//U<>/V 5/Root 1 0 R/Encrypt 14 0 R>>";
+        assert!(Pdf::new(data.to_vec()).is_err());
     }
 }
